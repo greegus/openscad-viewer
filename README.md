@@ -291,7 +291,7 @@ thumbnail and looks like the extension is broken. Test with the same API Finder 
 ```sh
 swiftc -O -sdk "$(xcrun --show-sdk-path)" Tools/qlprobe.swift \
   -framework QuickLookThumbnailing -framework AppKit -o /tmp/qlprobe
-/tmp/qlprobe ~/Projects/stolarina/kniznica.scad out.png
+/tmp/qlprobe Tests/groove.scad out.png
 ```
 
 The viewer also exposes diagnostic hooks for driving it from a test harness:
