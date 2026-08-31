@@ -1,0 +1,531 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SCAD 3D</title>
+<style>
+  :root { color-scheme: light dark; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body { background: #f5f5f5; }
+  @media (prefers-color-scheme: dark) { body { background: #1e1e1e; } }
+  #canvas { display: block; width: 100%; height: 100%; }
+  #status {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    font: 13px -apple-system, system-ui, sans-serif; color: #888;
+    pointer-events: none; text-align: center; white-space: pre-line;
+  }
+  .inspect-label {
+    position: absolute; transform: translate(-50%, -50%);
+    padding: 2px 7px; border-radius: 5px;
+    background: rgba(255, 159, 10, 0.95); color: #1a1a1a;
+    font: 600 12px -apple-system, system-ui, sans-serif;
+    pointer-events: none; white-space: nowrap;
+  }
+  .measure-label {
+    position: absolute; transform: translate(-50%, -50%);
+    padding: 2px 7px; border-radius: 5px;
+    background: rgba(255, 77, 109, 0.92); color: #fff;
+    font: 600 12px -apple-system, system-ui, sans-serif;
+    pointer-events: none; white-space: nowrap;
+  }
+  #readout {
+    position: absolute; left: 10px; bottom: 10px;
+    padding: 6px 11px; border-radius: 8px;
+    font: 12px -apple-system, system-ui, sans-serif;
+    color: rgba(255, 255, 255, 0.92);
+    background: rgba(18, 20, 24, 0.55);
+    backdrop-filter: blur(14px) saturate(1.4);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
+    box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.12);
+    pointer-events: none;
+  }
+  /* Nothing to say, nothing to draw — otherwise an empty pill floats there. */
+  #readout:empty { display: none; }
+</style>
+<canvas id="canvas"></canvas>
+<div id="status">Rendering mesh…</div>
+<div id="readout"></div>
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { STLLoader } from './vendor/STLLoader.js';
+import { OrbitControls } from './vendor/OrbitControls.js';
+import { createMeasure } from './measure.js';
+import { createInspect } from './inspect.js';
+import { pieceOutline, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
+import { updateStrokeResolution } from './strokes.js';
+import { createGrid } from './grid.js';
+
+const canvas = document.getElementById('canvas');
+const status = document.getElementById('status');
+const readoutEl = document.getElementById('readout');
+const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(dark ? 0x1e1e1e : 0xf5f5f5);
+// Two cameras, swapped in place. `view` is handed to the tools so they always read the
+// active one rather than a camera captured at construction time.
+const perspective = new THREE.PerspectiveCamera(40, 1, 0.1, 1000);
+const orthographic = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
+const view = { camera: orthographic };
+let controls = null;
+
+/// 'perspective' or 'isometric' (an orthographic projection: parallel edges stay parallel,
+/// so panel thicknesses can be compared across the model without foreshortening).
+let projection = 'isometric';
+
+/// Which preset direction the camera is currently on, if any. Declared up here on purpose:
+/// makeControls() ends with controls.update(), which fires 'change' synchronously, and the
+/// handler below reads this — a `let` further down would be in its temporal dead zone.
+let activeView = null;
+
+function makeControls() {
+  const target = controls ? controls.target.clone() : new THREE.Vector3();
+  controls?.dispose();
+  controls = new OrbitControls(view.camera, renderer.domElement);
+  // No damping: movement stops the moment the pointer does. Inertia makes it hard to
+  // land on a precise angle, which matters when you are inspecting joints.
+  controls.enableDamping = false;
+  controls.rotateSpeed = 0.65;
+  controls.zoomSpeed = 1.5;
+  controls.target.copy(target);
+
+  // Rotating away from a preset direction invalidates it; zooming and panning do not,
+  // since they leave the direction alone. So compare the direction rather than listening
+  // for interaction events.
+  controls.addEventListener('change', () => {
+    if (!activeView) return;
+    const wanted = modelVector(VIEWS[activeView].dir);
+    const current = view.camera.position.clone().sub(controls.target).normalize();
+    if (current.angleTo(wanted) > 0.5 * Math.PI / 180) {
+      activeView = null;
+      window.webkit?.messageHandlers?.viewer?.postMessage('view: none');
+    }
+  });
+
+  controls.update();
+}
+makeControls();
+
+function setProjection(kind) {
+  const to = kind === 'isometric' ? orthographic : perspective;
+  const from = view.camera;
+  projection = kind;
+  if (to === from) return;
+
+  to.position.copy(from.position);
+  to.quaternion.copy(from.quaternion);
+  const distance = from.position.distanceTo(controls.target);
+
+  if (to.isOrthographicCamera) {
+    // Match what perspective was framing at the target distance, so the swap does not jump.
+    const halfHeight = Math.tan((perspective.fov / 2) * Math.PI / 180) * distance;
+    frameOrtho(halfHeight);
+    to.near = 0.1;
+    to.far = distance * 4 + 1;
+    to.zoom = 1;
+  }
+  to.updateProjectionMatrix();
+  view.camera = to;
+  makeControls();
+  window.webkit?.messageHandlers?.viewer?.postMessage('projection: ' + kind);
+}
+
+/// Standard viewing directions, given in the model's own axes (OpenSCAD is Z-up: +X right,
+/// +Y back, +Z up) and rotated into three.js space, so they read the way a joiner expects.
+const VIEWS = {
+  '3d':    { dir: [0.55, -0.75, 0.42], up: [0, 0, 1] },
+  front:   { dir: [0, -1, 0],          up: [0, 0, 1] },
+  left:    { dir: [-1, 0, 0],          up: [0, 0, 1] },
+  right:   { dir: [1, 0, 0],           up: [0, 0, 1] },
+  top:     { dir: [0, 0, 1],           up: [0, -1, 0] },   // front edge towards the viewer
+};
+
+/// Points the camera along a standard direction, keeping the current distance and target so
+/// the switch does not also re-zoom.
+function setView(name) {
+  const preset = VIEWS[name];
+  if (!preset || !controls) return;
+  activeView = name;                 // set before update(), whose 'change' checks it
+  const camera = view.camera;
+  const distance = camera.position.distanceTo(controls.target) || 1;
+
+  camera.up.copy(modelVector(preset.up));
+  camera.position.copy(controls.target).addScaledVector(modelVector(preset.dir), distance);
+  camera.lookAt(controls.target);
+  camera.updateProjectionMatrix();
+  controls.update();
+  window.webkit?.messageHandlers?.viewer?.postMessage('view: ' + name);
+}
+
+function frameOrtho(halfHeight) {
+  const aspect = canvas.clientWidth / Math.max(canvas.clientHeight, 1);
+  orthographic.left = -halfHeight * aspect;
+  orthographic.right = halfHeight * aspect;
+  orthographic.top = halfHeight;
+  orthographic.bottom = -halfHeight;
+  orthographic.updateProjectionMatrix();
+}
+
+// Lights: one soft from above for volume, two directional for readable edges.
+scene.add(new THREE.HemisphereLight(0xffffff, dark ? 0x202020 : 0x9099a5, 1.1));
+const key = new THREE.DirectionalLight(0xffffff, 1.5);
+key.position.set(1, 1.4, 1.1);
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xffffff, 0.35);
+fill.position.set(-1, 0.4, -0.8);
+scene.add(fill);
+
+let parts = [];        // [{ mesh, xray, edges, geometry, rgba }]
+let mode = 'normal';
+let edgesOn = true;
+let piecesOn = true;
+let pieceLines = null;     // one LineSegments with every piece outline merged in
+let measure = null;
+let grid = null;
+let inspect = null;
+let tool = 'none';
+let components = [];
+
+// Edges are black in both modes — x-ray keeps the normal background, so there is no
+// longer any reason to lighten them.
+const EDGE_COLOR = 0x000000;
+const EDGE_OPACITY = 0.55;
+
+const MODES = {
+  normal: { solid: true,  xray: false },
+  xray:   { solid: false, xray: true  },
+};
+
+// --- materials ---
+
+/// Material for every line overlay (mesh edges and piece outlines alike).
+///
+/// Deliberately unbiased. A line lying exactly on its own surface would z-fight, but the
+/// cure belongs on the *fill*, not here — `solidMaterial` uses `polygonOffset` to push
+/// surfaces back by a depth unit. Biasing the lines forward instead (tried it) breaks real
+/// occlusion: with `near = radius/100` and a far plane in the thousands, NDC depth is so
+/// non-linear that a small clip-space nudge is worth centimetres in world space, i.e. more
+/// than a panel is thick, and hidden edges punch straight through.
+function edgeMaterial() {
+  return new THREE.LineBasicMaterial({
+    color: EDGE_COLOR, transparent: true, opacity: EDGE_OPACITY,
+  });
+}
+
+/// Materials come from the design's own `color()` calls, recovered from the CSG dump
+/// (OpenSCAD drops colour when exporting meshes). Alpha < 1 means real glass in the model.
+function solidMaterial(rgba) {
+  const [r, g, b, a] = rgba;
+  const transparent = a < 0.999;
+  return new THREE.MeshStandardMaterial({
+    color: new THREE.Color(r, g, b),
+    roughness: transparent ? 0.1 : 0.55,
+    metalness: 0.0,
+    transparent,
+    opacity: a,
+    // Transparent panels must not occlude what is behind them, otherwise draw order
+    // decides what you see and glass turns into a grey wall.
+    depthWrite: !transparent,
+    side: THREE.DoubleSide,      // an OpenSCAD mesh need not be 2-manifold
+    // Push the fill one depth unit back so line overlays lying exactly on a surface win,
+    // without giving them any advantage over geometry genuinely in front of them.
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1,
+  });
+}
+
+/// X-ray is the *same* shaded render as solid — same colours, same lighting — only
+/// translucent, so you read the structure without losing what the materials are.
+/// Alpha is capped rather than scaled: already-transparent glass stays as it is instead of
+/// being multiplied into invisibility.
+const XRAY_ALPHA_CAP = 0.32;
+
+function xrayMaterial(rgba) {
+  const material = solidMaterial(rgba);
+  material.transparent = true;
+  material.opacity = Math.min(rgba[3], XRAY_ALPHA_CAP);
+  // Without this every panel occludes the ones behind it and the view stops being x-ray.
+  material.depthWrite = false;
+  return material;
+}
+
+/// Modes are deliberately data, so another one (wireframe, section) needs no logic changes.
+function setMode(name) {
+  if (!MODES[name]) return;
+  mode = name;
+  const m = MODES[name];
+  for (const p of parts) {
+    p.mesh.visible = m.solid;
+    p.xray.visible = m.xray;
+    p.edges.visible = edgesOn;
+  }
+  inspect?.setOcclusion(name === 'normal');
+  measure?.setOcclusion(name === 'normal');
+  window.webkit?.messageHandlers?.viewer?.postMessage('mode: ' + name);
+}
+
+// Edges are independent of the mode — useful both as a CAD-style overlay on the
+// solid view and for reading structure in x-ray.
+function setEdges(on) {
+  edgesOn = !!on;
+  for (const p of parts) p.edges.visible = edgesOn;
+  window.webkit?.messageHandlers?.viewer?.postMessage('edges: ' + edgesOn);
+}
+
+/// Tools are mutually exclusive: 'none', 'inspect' or 'measure'.
+function setTool(name) {
+  tool = name;
+  // Disable first: setEnabled(false) clears the readout, which would wipe the hint the
+  // incoming tool has just written.
+  inspect?.setEnabled(false);
+  measure?.setEnabled(false);
+  if (name === 'inspect') inspect?.setEnabled(true);
+  if (name === 'measure') measure?.setEnabled(true);
+  window.webkit?.messageHandlers?.viewer?.postMessage('tool: ' + name);
+}
+
+// --- camera ---
+
+function fit() {
+  const box = new THREE.Box3();
+  for (const p of parts) box.expandByObject(p.mesh);
+  if (box.isEmpty()) return;
+
+  const sphere = box.getBoundingSphere(new THREE.Sphere());
+  const radius = Math.max(sphere.radius, 1e-3);
+  grid?.fitTo(radius);
+  // The distance at which the bounding sphere just fits the frame (+8% margin).
+  // Framing is defined by the perspective fov even in orthographic, so the two match.
+  const distance = radius / Math.tan((perspective.fov / 2) * Math.PI / 180) * 1.08;
+  const dir = modelVector(VIEWS['3d'].dir);
+  const camera = view.camera;
+  camera.near = radius / 100;
+  camera.far = distance + radius * 4;
+  camera.position.copy(sphere.center).addScaledVector(dir, distance);
+  if (camera.isOrthographicCamera) frameOrtho(radius * 1.08);
+  camera.updateProjectionMatrix();
+
+  controls.target.copy(sphere.center);
+  controls.maxDistance = distance * 4;
+  controls.update();
+}
+
+function resize() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  renderer.setSize(w, h, false);
+  updateStrokeResolution(w, h);
+  perspective.aspect = w / Math.max(h, 1);
+  perspective.updateProjectionMatrix();
+  frameOrtho((orthographic.top - orthographic.bottom) / 2);
+}
+new ResizeObserver(resize).observe(document.body);
+resize();
+
+// --- loading ---
+
+function clearParts() {
+  for (const p of parts) {
+    scene.remove(p.mesh, p.xray, p.edges);
+    p.geometry.dispose();
+    p.edges.geometry.dispose();
+  }
+  parts = [];
+}
+
+function addPart(buffer, rgba) {
+  const geometry = new STLLoader().parse(buffer);
+  geometry.computeVertexNormals();
+
+  const mesh = new THREE.Mesh(geometry, solidMaterial(rgba));
+  const xray = new THREE.Mesh(geometry, xrayMaterial(rgba));   // its own material instance
+  const edges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(geometry, 20),
+    edgeMaterial());
+
+  for (const o of [mesh, xray, edges]) {
+    scene.add(orientToWorld(o));
+  }
+  parts.push({ mesh, xray, edges, geometry, rgba });
+}
+
+/// Draws the outline of every individual piece.
+///
+/// The union welds touching panels into one body, so joints between a shelf and a side
+/// panel leave no seam in the mesh — and flush faces leave no edge at all. These outlines
+/// come from the CSG tree instead, where each piece is still its own box.
+/// Drawn exactly like the mesh edges — same black, same opacity, depth-tested — so turning
+/// this on simply adds the missing seams to the drawing instead of showing hidden pieces.
+function buildPieces(components) {
+  if (pieceLines) {
+    scene.remove(pieceLines);
+    pieceLines.geometry.dispose();
+    pieceLines = null;
+  }
+  if (!components?.length) return;
+
+  const points = [];
+  for (const c of components) {
+    const [sx, sy, sz] = c.size;
+    if (!(sx > 0 && sy > 0 && sz > 0)) continue;
+    points.push(...pieceOutline(c));
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+  pieceLines = new THREE.LineSegments(geometry, edgeMaterial());
+  orientToWorld(pieceLines);
+  pieceLines.visible = piecesOn;
+  scene.add(pieceLines);
+}
+
+function setPieces(on) {
+  piecesOn = !!on;
+  if (pieceLines) pieceLines.visible = piecesOn;
+  window.webkit?.messageHandlers?.viewer?.postMessage('pieces: ' + piecesOn);
+}
+
+/// Loads either the per-material manifest or, as a fallback, one colourless mesh.
+async function load() {
+  status.textContent = 'Rendering mesh…';
+  try {
+    clearParts();
+    let source = 'materials';
+    let manifest = null;
+    try {
+      manifest = await (await fetch('materials.json')).json();
+    } catch {
+      manifest = null;
+    }
+
+    if (manifest?.parts?.length) {
+      for (const [i, part] of manifest.parts.entries()) {
+        const buffer = await (await fetch(`part${i}.stl`)).arrayBuffer();
+        addPart(buffer, part.color);
+      }
+    } else {
+      source = 'single mesh';
+      const buffer = await (await fetch('mesh.stl')).arrayBuffer();
+      addPart(buffer, [0.78, 0.78, 0.78, 1]);
+    }
+
+    components = manifest?.components ?? [];
+    buildPieces(components);
+
+    grid ??= createGrid({ scene });
+    setMode(mode);
+    setEdges(edgesOn);
+    fit();
+
+    measure ??= createMeasure({
+      scene, view, renderer,
+      readout: (text) => { readoutEl.textContent = text; },
+    });
+    measure.setTargets(parts.map((p) => ({ mesh: p.mesh, edgesGeometry: p.edges.geometry })));
+
+    inspect ??= createInspect({
+      scene, view, renderer,
+      readout: (text) => { readoutEl.textContent = text; },
+    });
+    inspect.setTargets({ parts, components });
+    setTool(tool);
+
+    status.textContent = '';
+    const triangles = parts.reduce((n, p) => n + p.geometry.attributes.position.count / 3, 0);
+    window.webkit?.messageHandlers?.viewer?.postMessage(
+      `loaded ${parts.length} part(s), ${triangles} triangles (${source})`);
+    window.webkit?.messageHandlers?.viewer?.postMessage(
+      `panel: ${Math.round(document.body.clientWidth)}×${Math.round(document.body.clientHeight)}`);
+  } catch (e) {
+    status.textContent = 'Could not load the mesh:\n' + e;
+    window.webkit?.messageHandlers?.viewer?.postMessage('load error: ' + e);
+  }
+}
+
+function tick() {
+  controls.update();
+  measure?.update();
+  inspect?.update();
+  renderer.render(scene, view.camera);
+  requestAnimationFrame(tick);
+}
+tick();
+
+// The API Swift drives (ScadWebView calls these by name).
+window.loadMesh = load;
+window.setMode = setMode;
+window.setEdges = setEdges;
+window.setPieces = setPieces;
+window.setTool = setTool;
+window.setProjection = setProjection;
+window.setView = setView;
+
+/// Everything a test harness needs, in one namespace — module scope is otherwise invisible
+/// from outside. Kept deliberately: each entry is what re-verifies a behaviour the README
+/// documents, and hardcoded screen coordinates go stale as the model changes.
+window.debug = {
+  /// Whole viewer state: mode, projection, overlays, active tool, per-material parts.
+  state: () => ({
+    mode,
+    projection,
+    activeView,
+    edges: edgesOn,
+    pieces: piecesOn,
+    tool,
+    pieceSegments: pieceLines ? pieceLines.geometry.attributes.position.count / 2 : 0,
+    parts: parts.map((p) => ({
+      rgba: p.rgba,
+      triangles: p.geometry.attributes.position.count / 3,
+      solid: p.mesh.visible,
+      xray: p.xray.visible,
+    })),
+    status: status.textContent,
+    panel: [document.body.clientWidth, document.body.clientHeight],
+  }),
+
+  /// Camera direction in the model's own axes (Z-up) — checks the view presets.
+  cameraDirection: () => {
+    const m = worldToModelVector(view.camera.position.clone().sub(controls.target).normalize());
+    return [m.x, m.y, m.z].map((v) => Math.round(v * 100) / 100);
+  },
+
+  // Camera moves the controls would make, so preset invalidation can be tested: rotating
+  // off a preset must clear it, zooming and panning must not.
+  zoom: (factor) => {
+    const offset = view.camera.position.clone().sub(controls.target).multiplyScalar(factor);
+    view.camera.position.copy(controls.target).add(offset);
+    controls.update();
+  },
+  pan: (dx, dy) => {
+    controls.target.x += dx; view.camera.position.x += dx;
+    controls.target.y += dy; view.camera.position.y += dy;
+    controls.update();
+  },
+  rotate: (radians) => {
+    const offset = view.camera.position.clone().sub(controls.target);
+    offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), radians);
+    view.camera.position.copy(controls.target).add(offset);
+    controls.update();
+  },
+
+  // Inspect: what is under the cursor, where the modifier path resolves, and a point
+  // guaranteed to lie on an arc.
+  inspect: () => inspect?.debug() ?? null,
+  arcs: () => inspect?.arcs() ?? [],
+  arcPoint: (t) => inspect?.arcPoint(t) ?? null,
+  probeModifier: (x, y) => inspect?.probeModifier([x, y]) ?? null,
+
+  // Measure: drives the shelf-pitch check (1150 → 1455 mm must read exactly 305 mm).
+  edges: () => measure?.edges() ?? [],
+  distance: (i, j) => measure?.distanceBetween(i, j) ?? null,
+  select: (i, j) => measure?.select(i, j) ?? 0,
+};
+
+load();
+</script>

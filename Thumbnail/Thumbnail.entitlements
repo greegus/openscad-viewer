@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- macOS refuses to load an unsandboxed Quick Look plug-in ("plug-ins must be sandboxed") -->
+  <key>com.apple.security.app-sandbox</key><true/>
+  <key>com.apple.security.files.user-selected.read-only</key><true/>
+  <!-- Without this a sandboxed WKWebView (the Three.js viewer) never starts,
+       not even for local content — navigation simply never finishes. -->
+  <key>com.apple.security.network.client</key><true/>
+  <!-- otherwise the sandbox blocks mach-lookup of our render helper -->
+  <key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
+  <array><string>com.greegus.ScadQuickLook.Renderer</string></array>
+</dict>
+</plist>
