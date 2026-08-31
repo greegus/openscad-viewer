@@ -5,8 +5,8 @@ import { createStroke } from './strokes.js';
 /// Inspect: hover highlights what is under the cursor, a click selects it.
 ///
 /// Granularity follows the modifier key:
-///   - default                    → the edge under the cursor, otherwise the face
-///   - platform modifier held     → the whole part (Command on Apple, Ctrl elsewhere)
+///   - default          → the edge under the cursor, otherwise the face
+///   - Command held     → the whole part
 ///
 /// A "face" is not a triangle. The mesh is a triangle soup, so faces are reconstructed once
 /// per part by welding triangles that share an edge and lie in the same plane — otherwise
@@ -18,12 +18,6 @@ export function createInspect({ scene, view, renderer, readout }) {
 
   const canvas = renderer.domElement;
   const state = { enabled: false, features: [], pieces: [], meshes: [], groups: new Map(), occlude: true };
-
-  /// The platform's own modifier — Command on Apple, Ctrl elsewhere — because that is what
-  /// "hold the modifier" means to a person. Deliberately not `metaKey || ctrlKey` on both:
-  /// on macOS Ctrl-click is a synthesised secondary click, so accepting it would collide.
-  /// Declared up here because `hint()` above reads it.
-  const APPLE = /Mac|iPhone|iPad/.test(navigator.platform ?? navigator.userAgent);
 
   const HOVER = 0xffd60a;
   const SELECT = 0xff9f0a;
@@ -362,7 +356,7 @@ export function createInspect({ scene, view, renderer, readout }) {
     if (!selected) readout(hovered ? describe(hovered) : hint());
   }
 
-  const hint = () => `Click an edge or a face · hold ${APPLE ? '⌘' : 'Ctrl'} for the whole part`;
+  const hint = () => 'Click an edge or a face · hold ⌘ for the whole part';
 
   canvas.addEventListener('pointermove', (event) => {
     lastPx = cursorPx(event, canvas);
@@ -375,14 +369,16 @@ export function createInspect({ scene, view, renderer, readout }) {
   // The modifier can change without the pointer moving, so track the key too.
   for (const type of ['keydown', 'keyup']) {
     window.addEventListener(type, (event) => {
-      if (event.key !== 'Meta' && event.key !== 'Control' && event.key !== 'Escape') return;
+      if (event.key !== 'Meta' && event.key !== 'Escape') return;
       if (event.key === 'Escape') { if (state.enabled) clear(); return; }
       modifier = type === 'keydown';
       refreshHover();
     });
   }
 
-  const wantsWholePart = (e) => (APPLE ? e.metaKey : e.ctrlKey);
+  /// Command. Not Ctrl as well: on macOS Ctrl-click is a synthesised secondary click, so
+  /// accepting it would collide with the context menu.
+  const wantsWholePart = (e) => e.metaKey;
 
   let down = null;
   canvas.addEventListener('pointerdown', (e) => {

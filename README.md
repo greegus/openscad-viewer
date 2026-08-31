@@ -151,10 +151,9 @@ never learns which host it is in — that difference used to live inside it.
   2), the surviving outline is clipped where the groove opens (14 segments, not 12), and the
   groove walls still show as mesh edges.
 - **Inspect** (`Web/inspect.js`): hover highlights what is under the cursor, a click selects it.
-  Granularity follows the platform modifier — plain gives the edge under the cursor, else the
-  face; holding **Command** (Ctrl off Apple) gives the whole part. Deliberately not
-  `metaKey || ctrlKey` on both platforms: on macOS Ctrl-click is a synthesised secondary
-  click, so accepting it would collide with the context menu.
+  Granularity follows the modifier — plain gives the edge under the cursor, else the face;
+  holding **Command** gives the whole part. Not Ctrl as well: on macOS Ctrl-click is a
+  synthesised secondary click and would collide with the context menu.
   - An edge reports length and the axis it runs along; a face reports its in-plane size, area
     and facing; a part reports `w × d × h`, volume, model-space corner and an **id**.
   - A "face" is not a triangle. The mesh is a triangle soup, so faces are reconstructed once
