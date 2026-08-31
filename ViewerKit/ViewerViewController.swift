@@ -173,9 +173,6 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
         // well as our own constraints) overrode the pinning and the view stopped tracking the window.
         root.autoresizingMask = [.width, .height]   // fallback until there is a superview
         view = root
-        // Quick Look ignores the root's own frame — measured: the panel stayed 800×600 no
-        // matter what we set — but it does honour this. 20 % above that default.
-        preferredContentSize = NSSize(width: 960, height: 720)
         if WebGLProbe.isEnabled {
             let probe = WebGLProbe()
             self.probe = probe
