@@ -5,8 +5,8 @@ import { createStroke } from './strokes.js';
 /// Inspect: hover highlights what is under the cursor, a click selects it.
 ///
 /// Granularity follows the modifier key:
-///   - default        → the edge under the cursor, otherwise the face
-///   - Option (Alt)   → the whole part
+///   - default                    → the edge under the cursor, otherwise the face
+///   - platform modifier held     → the whole part (Command on Apple, Ctrl elsewhere)
 ///
 /// A "face" is not a triangle. The mesh is a triangle soup, so faces are reconstructed once
 /// per part by welding triangles that share an edge and lie in the same plane — otherwise
@@ -18,6 +18,12 @@ export function createInspect({ scene, view, renderer, readout }) {
 
   const canvas = renderer.domElement;
   const state = { enabled: false, features: [], pieces: [], meshes: [], groups: new Map(), occlude: true };
+
+  /// The platform's own modifier — Command on Apple, Ctrl elsewhere — because that is what
+  /// "hold the modifier" means to a person. Deliberately not `metaKey || ctrlKey` on both:
+  /// on macOS Ctrl-click is a synthesised secondary click, so accepting it would collide.
+  /// Declared up here because `hint()` above reads it.
+  const APPLE = /Mac|iPhone|iPad/.test(navigator.platform ?? navigator.userAgent);
 
   const HOVER = 0xffd60a;
   const SELECT = 0xff9f0a;
@@ -339,6 +345,10 @@ export function createInspect({ scene, view, renderer, readout }) {
     return `${mm(f.width)} × ${mm(f.height)} mm`;
   }
 
+  /// Diagnostic: modifier flags of the last real pointer event, to tell a logic problem from
+  /// a modifier that never reaches the page.
+  let lastEvent = null;
+
   let selected = null;
   let hovered = null;
   let lastPx = null;
@@ -352,35 +362,45 @@ export function createInspect({ scene, view, renderer, readout }) {
     if (!selected) readout(hovered ? describe(hovered) : hint());
   }
 
-  const hint = () => 'Click an edge or a face · hold ⌥ for the whole part';
+  const hint = () => `Click an edge or a face · hold ${APPLE ? '⌘' : 'Ctrl'} for the whole part`;
 
   canvas.addEventListener('pointermove', (event) => {
     lastPx = cursorPx(event, canvas);
-    modifier = event.altKey;
+    modifier = wantsWholePart(event);
+    lastEvent = { type: 'pointermove', meta: event.metaKey, ctrl: event.ctrlKey,
+                  alt: event.altKey, shift: event.shiftKey };
     refreshHover();
   });
 
   // The modifier can change without the pointer moving, so track the key too.
   for (const type of ['keydown', 'keyup']) {
     window.addEventListener(type, (event) => {
-      if (event.key !== 'Alt' && event.key !== 'Escape') return;
+      if (event.key !== 'Meta' && event.key !== 'Control' && event.key !== 'Escape') return;
       if (event.key === 'Escape') { if (state.enabled) clear(); return; }
       modifier = type === 'keydown';
       refreshHover();
     });
   }
 
+  const wantsWholePart = (e) => (APPLE ? e.metaKey : e.ctrlKey);
+
   let down = null;
-  canvas.addEventListener('pointerdown', (e) => { down = { px: cursorPx(e, canvas), time: performance.now() }; });
+  canvas.addEventListener('pointerdown', (e) => {
+    down = { px: cursorPx(e, canvas), time: performance.now(), modifier: wantsWholePart(e) };
+    lastEvent = { type: 'pointerdown', meta: e.metaKey, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey };
+  });
   canvas.addEventListener('pointerup', (e) => {
     if (!state.enabled || !down) return;
     const px = cursorPx(e, canvas);
     const moved = px.distanceTo(down.px);
     const held = performance.now() - down.time;
-    down = null;
-    if (moved > 4 || held > 400) return;      // that was a drag, it belongs to OrbitControls
+    if (moved > 4 || held > 400) { down = null; return; }   // a drag: that is OrbitControls'
 
-    selected = targetAt(px, e.altKey);
+    lastEvent = { type: 'pointerup', meta: e.metaKey, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey };
+    // Either end of the click counts: the flag can be present on the press and gone by the
+    // release, and a key held for the whole gesture is the same intent either way.
+    selected = targetAt(px, down.modifier || wantsWholePart(e) || modifier);
+    down = null;
     anchor = show(selected, selectLines, selectFace);
     if (selected) {
       label.textContent = shortLabel(selected);
@@ -430,15 +450,16 @@ export function createInspect({ scene, view, renderer, readout }) {
     const point = new THREE.Vector2(px[0], px[1]);
     const h = hit(point);
     if (!h) return 'no ray hit';
-    const piece = pieceAt(h.point);
-    if (piece) return 'part';
     const info = state.groups.get(h.object);
     if (!info) return 'no face groups for mesh';
+    const piece = pieceAt(h.point);
+    if (piece) return 'part';
     const tris = info.bodies.get(info.findBody(h.faceIndex));
     return tris ? 'body' : 'no body group';
   };
 
   const debug = () => ({
+    lastEvent,
     hovered: hovered ? { type: hovered.type, segments: hovered.feature?.segments.length ?? null } : null,
     selected: selected ? { type: selected.type, segments: selected.feature?.segments.length ?? null } : null,
     drawnHover: hoverLines.segmentCount,
