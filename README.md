@@ -37,7 +37,7 @@ Core/        renderer and CSG analysis — no UI, no XPC, no host assumptions
 Viewer/      the 3D viewer: index.html, ES modules, vendored three.js
 ViewerKit/   Swift wrapper over Viewer/ — ScadWebView, ViewerViewController
 QuickLook/   the two appexes, the XPC contract and the render helper
-App/         the container app (and, next, the standalone viewer)
+App/         the standalone viewer app
 ```
 
 The seam that makes this work is `GeometryProvider` in `Core/`. A Quick Look extension must
@@ -314,6 +314,22 @@ The viewer also exposes diagnostic hooks for driving it from a test harness:
 `window.debug.state()`, `debug.edges()`, `debug.distance(i, j)`, `debug.select(i, j)`,
 `debug.cameraDirection()`, `debug.arcs()`, `debug.inspect()`. All diagnostics live under that one
 namespace; the seven globals beside it (`setMode`, `setView`, …) are the API Swift drives.
+
+## The standalone app
+
+`OpenSCADViewer.app` is document-based, so opening files, tabs, the recents menu and window
+restoration come from AppKit. It reuses `ViewerKit/` unchanged and renders through
+`LocalGeometryProvider` — in process, because only a Quick Look plug-in is forced into a
+sandbox. It also opens paths given on the command line.
+
+It re-renders when the file changes on disk, which is the point of keeping it open next to an
+editor. `FileWatcher` watches the *containing directory*, not the file: editors save by writing
+a temp file and renaming it over the original, which replaces the inode and leaves a file-level
+watch pointing at something nobody will write to again. Events are coalesced and checked against
+the file's mtime, so one save costs one render.
+
+It registers as `Viewer` with rank `Alternate` for `org.openscad.scad`, so installing it does
+not take the double-click away from OpenSCAD itself.
 
 ## Install
 

@@ -35,9 +35,12 @@
   <array>
     <dict>
       <key>CFBundleTypeName</key><string>OpenSCAD Source</string>
-      <key>CFBundleTypeRole</key><string>QLGenerator</string>
+      <!-- Viewer, not Editor: nothing here writes the file. Rank Alternate so installing this
+           does not steal the double-click away from OpenSCAD itself. -->
+      <key>CFBundleTypeRole</key><string>Viewer</string>
       <key>LSItemContentTypes</key><array><string>org.openscad.scad</string></array>
-      <key>LSHandlerRank</key><string>None</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>NSDocumentClass</key><string>ViewerDocument</string>
     </dict>
   </array>
 </dict>

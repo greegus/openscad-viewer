@@ -14,8 +14,11 @@ mkdir -p "$OUT/Contents/MacOS" "$APPEX/Contents/MacOS" "$PREVIEW/Contents/MacOS"
 
 echo "→ container app"
 swiftc -O -target "$TARGET" -sdk "$SDK" -module-name OpenSCADViewer \
-  Core/ScadRenderer.swift Core/CSGSplitter.swift Core/Config.swift Core/GeometryProvider.swift App/main.swift \
-  -framework AppKit -o "$OUT/Contents/MacOS/OpenSCADViewer"
+  Core/ScadRenderer.swift Core/CSGSplitter.swift Core/Config.swift Core/GeometryProvider.swift \
+  ViewerKit/ViewerViewController.swift ViewerKit/ScadWebView.swift ViewerKit/WebGLProbe.swift \
+  App/ViewerDocument.swift App/FileWatcher.swift App/Settings.swift App/main.swift \
+  -framework AppKit -framework Quartz -framework WebKit \
+  -o "$OUT/Contents/MacOS/OpenSCADViewer"
 
 echo "→ render helper (outside the sandbox, runs OpenSCAD)"
 swiftc -O -target "$TARGET" -sdk "$SDK" -module-name ScadRenderHelper \
@@ -37,7 +40,8 @@ swiftc -O -target "$TARGET" -sdk "$SDK" -parse-as-library -module-name ScadPrevi
   -Xlinker -e -Xlinker _NSExtensionMain \
   -o "$PREVIEW/Contents/MacOS/ScadPreview"
 
-mkdir -p "$PREVIEW/Contents/Resources/Web"
+mkdir -p "$OUT/Contents/Resources/Web" "$PREVIEW/Contents/Resources/Web"
+cp -R Viewer/ "$OUT/Contents/Resources/Web/"
 cp -R Viewer/ "$PREVIEW/Contents/Resources/Web/"
 cp QuickLook/Preview/Info.plist "$PREVIEW/Contents/Info.plist"
 cp App/Info.plist "$OUT/Contents/Info.plist"

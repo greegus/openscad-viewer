@@ -1,66 +1,76 @@
 import AppKit
+import os
 
-/// Container app. Its only jobs are (a) to carry the extensions,
-/// (b) to declare the UTI for .scad, (c) to give the user settings.
+/// Standalone viewer. Document-based, so opening files, tabs, the recents menu and window
+/// restoration come from AppKit rather than from us.
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var window: NSWindow!
-    private let pathField = NSTextField(string: "")
-    private let status = NSTextField(labelWithString: "")
+
+    private let settings = SettingsWindowController()
+    private static let log = Logger(subsystem: "com.greegus.OpenSCADViewer", category: "app")
 
     func applicationDidFinishLaunching(_ note: Notification) {
-        let defaults = UserDefaults(suiteName: Config.suiteName)
-        pathField.stringValue = defaults?.string(forKey: "openscadPath")
-            ?? ScadRenderer.locateOpenSCAD() ?? ""
-        pathField.placeholderString = "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"
+        buildMenu()
 
-        let title = NSTextField(labelWithString: "OpenSCAD Viewer")
-        title.font = .systemFont(ofSize: 20, weight: .semibold)
-        let label = NSTextField(labelWithString: "OpenSCAD path:")
-
-        let save = NSButton(title: "Save", target: self, action: #selector(save))
-        let clear = NSButton(title: "Clear cache", target: self, action: #selector(clearCache))
-        status.textColor = .secondaryLabelColor
-        refreshStatus()
-
-        let stack = NSStackView(views: [title, label, pathField,
-                                        NSStackView(views: [save, clear]), status])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 10
-        stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
-        pathField.widthAnchor.constraint(equalToConstant: 460).isActive = true
-
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 220),
-                          styleMask: [.titled, .closable, .miniaturizable],
-                          backing: .buffered, defer: false)
-        window.title = "OpenSCAD Viewer"
-        window.contentView = stack
-        window.center()
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
-    @objc private func save() {
-        UserDefaults(suiteName: Config.suiteName)?.set(pathField.stringValue, forKey: "openscadPath")
-        refreshStatus()
-    }
-
-    @objc private func clearCache() {
-        let dir = ScadRenderer.cacheDirectory
-        for f in (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [] {
-            try? FileManager.default.removeItem(at: f)
+        // Files given on the command line: useful on its own, and the only way to drive the
+        // app without LaunchServices — which matters for testing.
+        let paths = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }
+        if !paths.isEmpty {
+            application(NSApp, open: paths.map { URL(fileURLWithPath: $0) })
         }
-        refreshStatus()
     }
 
-    private func refreshStatus() {
-        let found = ScadRenderer.locateOpenSCAD()
-        let count = ((try? FileManager.default.contentsOfDirectory(atPath: ScadRenderer.cacheDirectory.path)) ?? []).count
-        status.stringValue = (found == nil ? "⚠️ OpenSCAD not found" : "✅ OpenSCAD: \(found!)")
-            + "  ·  cache: \(count) items"
+    /// AppKit only shows its own open panel when we do not; opening one from
+    /// applicationDidFinishLaunching raced the file LaunchServices was about to deliver.
+    func applicationShouldOpenUntitledFile(_ app: NSApplication) -> Bool { false }
+
+    func application(_ app: NSApplication, open urls: [URL]) {
+        for url in urls {
+            NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { document, _, error in
+                if let error {
+                    fputs("open failed: \(error.localizedDescription)\n", stderr)
+                } else {
+                    fputs("opened: \(document?.displayName ?? "?")\n", stderr)
+                }
+            }
+        }
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { true }
+    /// Built in code because the app has no nib. Only the items that do something are here.
+    private func buildMenu() {
+        let main = NSMenu()
+
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
+            .target = self
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Hide OpenSCAD Viewer", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "Quit OpenSCAD Viewer", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = appMenu
+        main.addItem(appItem)
+
+        let fileItem = NSMenuItem()
+        let fileMenu = NSMenu(title: "File")
+        fileMenu.addItem(withTitle: "Open…", action: #selector(NSDocumentController.openDocument(_:)), keyEquivalent: "o")
+        fileMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        fileItem.submenu = fileMenu
+        main.addItem(fileItem)
+
+        let windowItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Minimise", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowItem.submenu = windowMenu
+        main.addItem(windowItem)
+        NSApp.windowsMenu = windowMenu
+
+        NSApp.mainMenu = main
+    }
+
+    @objc private func showSettings() { settings.show() }
+
+    /// Quitting with no window open is the Preview-like behaviour: the app is its documents.
+    func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { true }
 }
 
 let app = NSApplication.shared
