@@ -108,8 +108,34 @@ function makeControls() {
     }
   });
 
+  // Orbit around what the camera is aimed at, not the middle of the model. Rotating while
+  // zoomed into a joint otherwise swings it off screen, because the pivot stays at the scene
+  // centre. Re-aimed as a gesture starts, in capture so it lands before OrbitControls reads
+  // the drag.
+  //
+  // The new pivot is picked along the view axis — the ray through the centre of the viewport —
+  // so `camera.position - target` keeps its direction and a standard view stays active.
+  renderer.domElement.addEventListener('pointerdown', recentrePivot, true);
+
   controls.update();
 }
+
+const pivotRay = new THREE.Raycaster();
+const pivotCentre = new THREE.Vector2(0, 0);   // NDC centre = the camera's own axis
+
+function recentrePivot() {
+  if (!controls || !parts.length) return;
+  const distance = view.camera.position.distanceTo(controls.target);
+
+  pivotRay.setFromCamera(pivotCentre, view.camera);
+  const hit = pivotRay.intersectObjects(parts.map((p) => p.mesh), false)[0];
+
+  // Nothing under the centre — looking past the model. Keep the orbit radius rather than
+  // letting the pivot jump, so the feel does not change when the model leaves the middle.
+  controls.target.copy(hit ? hit.point
+    : pivotRay.ray.origin.clone().addScaledVector(pivotRay.ray.direction, distance));
+}
+
 makeControls();
 
 function setProjection(kind) {

@@ -139,7 +139,13 @@ never learns which host it is in — that difference used to live inside it.
 - **The control row** lives in one `NSStackView`, centred while it fits and clamped to the
   left edge when it does not: the left constraint is required, the right one optional, so a
   row too wide for the panel gives way on the right instead of hiding the mode picker.
-- **Controls** have damping off. Inertia makes it hard to land on a precise angle, which is
+- **Controls** orbit around what the camera is aimed at, not the centre of the model: a
+  detail you have zoomed into stays put when you rotate, instead of swinging away around the
+  scene centre. The pivot is re-aimed as a gesture begins, one raycast per gesture, and is
+  taken along the *view axis* rather than from the point under the cursor — that keeps
+  `camera.position - target` pointing the same way, so a standard view stays active instead of
+  being cleared by every click. With nothing under the centre the pivot keeps its distance, so
+  the orbit radius does not jump. Damping is off. Inertia makes it hard to land on a precise angle, which is
   what you want when inspecting a joint.
 - **Edges** are an independent toggle, not tied to the mode, and black in both modes
   (technical-drawing look) — x-ray keeps the normal background, so there is no reason to
