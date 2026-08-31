@@ -27,8 +27,3 @@ import Foundation
 public enum ServiceName {
     public static let mach = "com.greegus.OpenSCADViewer.Renderer"
 }
-
-public enum Config {
-    /// Shared domain for both preferences and the cache directory name.
-    public static let suiteName = "com.greegus.OpenSCADViewer"
-}

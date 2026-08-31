@@ -30,6 +30,22 @@ Finder ──► ScadPreview.appex   ─┘        │
                               ~/Library/Caches/com.greegus.OpenSCADViewer
 ```
 
+### Layout
+
+```
+Core/        renderer and CSG analysis — no UI, no XPC, no host assumptions
+Viewer/      the 3D viewer: index.html, ES modules, vendored three.js
+ViewerKit/   Swift wrapper over Viewer/ — ScadWebView, ViewerViewController
+QuickLook/   the two appexes, the XPC contract and the render helper
+App/         the container app (and, next, the standalone viewer)
+```
+
+The seam that makes this work is `GeometryProvider` in `Core/`. A Quick Look extension must
+be sandboxed and so cannot spawn OpenSCAD; it renders through the XPC helper
+(`XPCGeometryProvider`). A normal app has no such limit and renders in process
+(`LocalGeometryProvider`). Both hand the viewer the same bytes, so `ViewerViewController`
+never learns which host it is in — that difference used to live inside it.
+
 - **The appexes** are sandboxed (the system will not load them otherwise) and hold
   `temporary-exception.mach-lookup.global-name` for our XPC service.
 - **The helper** is a LaunchAgent with `MachServices`, so launchd starts it on demand and

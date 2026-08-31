@@ -2,7 +2,11 @@ import AppKit
 import QuickLookUI
 import os
 
-/// Quick Look preview (spacebar in Finder): interactive 3D with display modes and tools.
+/// The interactive 3D viewer: display modes, overlays and the inspect/measure tools.
+///
+/// Host-agnostic. Geometry arrives through a `GeometryProvider`, so this same controller
+/// backs the Quick Look panel (which must render out of process) and the standalone app
+/// (which renders in process) without knowing which it is.
 /// Quick Look sizes our view itself and `autoresizingMask` is not enough for that —
 /// the root can grow beyond the panel (the controls then fall off the right edge).
 /// So we pin ourselves to the host view with constraints.
@@ -20,7 +24,10 @@ private final class RootView: NSView {
     }
 }
 
-final class PreviewViewController: NSViewController, QLPreviewingController {
+open class ViewerViewController: NSViewController, QLPreviewingController {
+
+    /// Where the geometry comes from — in-process for an app, over XPC for an extension.
+    public var geometryProvider: GeometryProvider?
 
     /// Quick Look failures are otherwise invisible — this is the only trace left behind.
     /// Read with: log show --last 5m --predicate 'subsystem == "com.greegus.OpenSCADViewer"'
@@ -66,7 +73,7 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
     private var probe: WebGLProbe?
     private var meshLoaded = false
 
-    override func loadView() {
+    public override func loadView() {
         let root = RootView(frame: NSRect(x: 0, y: 0, width: 800, height: 620))
 
         webView.translatesAutoresizingMaskIntoConstraints = false
@@ -177,7 +184,7 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
         Self.log.info("loadView finished")
     }
 
-    override func viewDidLayout() {
+    public override func viewDidLayout() {
         super.viewDidLayout()
         // Make the area Quick Look actually gave us visible in the log.
         Self.log.info("layout: view \(NSStringFromRect(self.view.bounds), privacy: .public) host \(NSStringFromRect(self.view.superview?.bounds ?? .zero), privacy: .public) controls \(NSStringFromRect(self.controlRow.frame), privacy: .public)")
@@ -185,7 +192,7 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
 
     // MARK: - QLPreviewingController
 
-    func preparePreviewOfFile(at url: URL, completionHandler handler: @escaping (Error?) -> Void) {
+    public func preparePreviewOfFile(at url: URL, completionHandler handler: @escaping (Error?) -> Void) {
         fileURL = url
         Self.log.info("preparePreview: \(url.path, privacy: .public)")
         // Return immediately; the render finishes asynchronously so the panel opens without delay.
@@ -232,34 +239,35 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
         webView.setMode(Self.modes[max(modePicker.selectedSegment, 0)].id)
 
         if meshLoaded { return }
+        guard let provider = geometryProvider else {
+            show(error: "no geometry provider was set")
+            return
+        }
         spinner.startAnimation(nil)
 
-        let source = (try? Data(contentsOf: url)) ?? Data()
-        let connection = NSXPCConnection(machServiceName: ServiceName.mach, options: [])
-        connection.remoteObjectInterface = NSXPCInterface(with: ScadRenderService.self)
-        connection.resume()
-
-        let finish: (Data?, String?) -> Void = { [weak self] data, error in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.spinner.stopAnimation(nil)
-                if let data {
-                    Self.log.info("materials ok: \(data.count) B")
-                    self.meshLoaded = true
-                    self.webView.show(materials: data)
-                } else {
-                    Self.log.error("mesh zlyhal: \(error ?? "-", privacy: .public)")
-                    self.message.stringValue = "Could not export the mesh:\n\(error ?? "unknown error")"
-                    self.message.isHidden = false
-                }
-                connection.invalidate()
+        provider.materials(for: url) { [weak self] result in
+            guard let self else { return }
+            self.spinner.stopAnimation(nil)
+            switch result {
+            case .success(let data):
+                Self.log.info("materials ok: \(data.count) B")
+                self.meshLoaded = true
+                self.webView.show(materials: data)
+            case .failure(let error):
+                Self.log.error("mesh failed: \(error.localizedDescription, privacy: .public)")
+                self.show(error: error.localizedDescription)
             }
         }
-
-        let proxy = connection.remoteObjectProxyWithErrorHandler { err in
-            finish(nil, err.localizedDescription)
-        } as? ScadRenderService
-        proxy?.exportMaterials(path: url.path, source: source) { data, error in finish(data, error) }
     }
 
+    private func show(error text: String) {
+        message.stringValue = "Could not export the mesh:\n\(text)"
+        message.isHidden = false
+    }
+
+    /// Re-renders from disk — for a file that changed under us.
+    public func reload() {
+        meshLoaded = false
+        loadMesh()
+    }
 }
