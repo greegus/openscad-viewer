@@ -37,7 +37,10 @@ enum ScadRenderer {
         var candidates = ["/opt/homebrew/bin/openscad", "/usr/local/bin/openscad"]
         for dir in ["/Applications", "\(NSHomeDirectory())/Applications"] {
             let apps = (try? fm.contentsOfDirectory(atPath: dir)) ?? []
-            for app in apps where app.hasPrefix("OpenSCAD") && app.hasSuffix(".app") {
+            // Our own bundle is called OpenSCADViewer.app, which matches this prefix — skip it,
+            // or a future rename of our executable would have us try to run ourselves.
+            for app in apps where app.hasPrefix("OpenSCAD") && app.hasSuffix(".app")
+                                  && app != "OpenSCADViewer.app" {
                 candidates.append("\(dir)/\(app)/Contents/MacOS/OpenSCAD")
             }
         }

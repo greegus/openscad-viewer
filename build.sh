@@ -1,11 +1,11 @@
 #!/bin/bash
-# Builds ScadQuickLook.app (container + sandboxed QL extensions + render helper) without an Xcode project.
+# Builds OpenSCADViewer.app (container + sandboxed QL extensions + render helper) without an Xcode project.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 SDK=$(xcrun --show-sdk-path)
 TARGET="$(uname -m)-apple-macos13.0"
-OUT=build/ScadQuickLook.app
+OUT=build/OpenSCADViewer.app
 APPEX=$OUT/Contents/PlugIns/ScadThumbnail.appex
 PREVIEW=$OUT/Contents/PlugIns/ScadPreview.appex
 
@@ -13,9 +13,9 @@ rm -rf build
 mkdir -p "$OUT/Contents/MacOS" "$APPEX/Contents/MacOS" "$PREVIEW/Contents/MacOS"
 
 echo "→ container app"
-swiftc -O -target "$TARGET" -sdk "$SDK" -module-name ScadQuickLook \
+swiftc -O -target "$TARGET" -sdk "$SDK" -module-name OpenSCADViewer \
   Shared/ScadRenderer.swift Shared/RenderService.swift Shared/CSGSplitter.swift App/main.swift \
-  -framework AppKit -o "$OUT/Contents/MacOS/ScadQuickLook"
+  -framework AppKit -o "$OUT/Contents/MacOS/OpenSCADViewer"
 
 echo "→ render helper (outside the sandbox, runs OpenSCAD)"
 swiftc -O -target "$TARGET" -sdk "$SDK" -module-name ScadRenderHelper \

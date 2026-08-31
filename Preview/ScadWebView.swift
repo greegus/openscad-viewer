@@ -11,7 +11,7 @@ import os
 final class ScadWebView: NSView, WKScriptMessageHandler, WKNavigationDelegate {
 
     static let scheme = "scadview"
-    private static let log = Logger(subsystem: "com.greegus.ScadQuickLook", category: "webview")
+    private static let log = Logger(subsystem: "com.greegus.OpenSCADViewer", category: "webview")
 
     private let handler = ResourceHandler()
     private var webView: WKWebView!

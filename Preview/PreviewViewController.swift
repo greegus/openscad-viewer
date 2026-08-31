@@ -23,8 +23,8 @@ private final class RootView: NSView {
 final class PreviewViewController: NSViewController, QLPreviewingController {
 
     /// Quick Look failures are otherwise invisible — this is the only trace left behind.
-    /// Read with: log show --last 5m --predicate 'subsystem == "com.greegus.ScadQuickLook"'
-    private static let log = Logger(subsystem: "com.greegus.ScadQuickLook", category: "preview")
+    /// Read with: log show --last 5m --predicate 'subsystem == "com.greegus.OpenSCADViewer"'
+    private static let log = Logger(subsystem: "com.greegus.OpenSCADViewer", category: "preview")
 
     /// Camera projection. Isometric is orthographic: parallel edges stay parallel, so
     /// thicknesses can be compared across the model without foreshortening.

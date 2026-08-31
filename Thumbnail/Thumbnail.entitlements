@@ -10,6 +10,6 @@
   <key>com.apple.security.network.client</key><true/>
   <!-- otherwise the sandbox blocks mach-lookup of our render helper -->
   <key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
-  <array><string>com.greegus.ScadQuickLook.Renderer</string></array>
+  <array><string>com.greegus.OpenSCADViewer.Renderer</string></array>
 </dict>
 </plist>

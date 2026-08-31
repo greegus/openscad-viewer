@@ -7,7 +7,7 @@ import os
 /// Requires the `com.apple.security.network.client` entitlement (see Thumbnail.entitlements).
 final class WebGLProbe: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
 
-    private static let log = Logger(subsystem: "com.greegus.ScadQuickLook", category: "webgl")
+    private static let log = Logger(subsystem: "com.greegus.OpenSCADViewer", category: "webgl")
 
     /// A sandboxed appex does not read the global preferences domain, so a `defaults write`
     /// switch does not work here — flip this to `true` and rebuild instead.

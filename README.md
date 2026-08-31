@@ -27,7 +27,7 @@ Finder ──► ScadPreview.appex   ─┘        │
                               OpenSCAD  (PNG · STL · CSG)
                                          │
                                          ▼
-                              ~/Library/Caches/com.greegus.ScadQuickLook
+                              ~/Library/Caches/com.greegus.OpenSCADViewer
 ```
 
 - **The appexes** are sandboxed (the system will not load them otherwise) and hold
@@ -271,7 +271,7 @@ Failures inside a Quick Look extension are invisible — they surface only as
 subsystem:
 
 ```sh
-log show --last 5m --info --predicate 'subsystem == "com.greegus.ScadQuickLook"'
+log show --last 5m --info --predicate 'subsystem == "com.greegus.OpenSCADViewer"'
 ```
 
 A healthy run reads: `loadView finished` → `preparePreview: …` → `materials ok: … B` →
@@ -302,12 +302,12 @@ namespace; the seven globals beside it (`setMode`, `setView`, …) are the API S
 ## Install
 
 ```sh
-./build.sh      # builds build/ScadQuickLook.app — plain swiftc, no Xcode project
+./build.sh      # builds build/OpenSCADViewer.app — plain swiftc, no Xcode project
 ./install.sh    # /Applications + LaunchAgent + extension registration
 ./uninstall.sh
 ```
 
-`ScadQuickLook.app` doubles as settings: the OpenSCAD path and clearing the cache.
+`OpenSCADViewer.app` doubles as settings: the OpenSCAD path and clearing the cache.
 OpenSCAD is looked up in this order: `OPENSCAD_PATH` → setting →
 `/Applications/OpenSCAD*.app` → homebrew.
 

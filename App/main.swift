@@ -13,7 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ?? ScadRenderer.locateOpenSCAD() ?? ""
         pathField.placeholderString = "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"
 
-        let title = NSTextField(labelWithString: "SCAD Quick Look")
+        let title = NSTextField(labelWithString: "OpenSCAD Viewer")
         title.font = .systemFont(ofSize: 20, weight: .semibold)
         let label = NSTextField(labelWithString: "OpenSCAD path:")
 
@@ -33,7 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 220),
                           styleMask: [.titled, .closable, .miniaturizable],
                           backing: .buffered, defer: false)
-        window.title = "SCAD Quick Look"
+        window.title = "OpenSCAD Viewer"
         window.contentView = stack
         window.center()
         window.makeKeyAndOrderFront(nil)

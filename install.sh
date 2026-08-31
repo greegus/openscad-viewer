@@ -3,12 +3,12 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-APP=/Applications/ScadQuickLook.app
-LABEL=com.greegus.ScadQuickLook.Renderer
+APP=/Applications/OpenSCADViewer.app
+LABEL=com.greegus.OpenSCADViewer.Renderer
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
 rm -rf "$APP"
-cp -R build/ScadQuickLook.app /Applications/
+cp -R build/OpenSCADViewer.app /Applications/
 
 mkdir -p "$HOME/Library/LaunchAgents"
 cat > "$PLIST" <<PL
