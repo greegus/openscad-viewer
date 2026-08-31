@@ -7,13 +7,19 @@ import os
 /// Host-agnostic. Geometry arrives through a `GeometryProvider`, so this same controller
 /// backs the Quick Look panel (which must render out of process) and the standalone app
 /// (which renders in process) without knowing which it is.
-/// Quick Look sizes our view itself and `autoresizingMask` is not enough for that —
-/// the root can grow beyond the panel (the controls then fall off the right edge).
-/// So we pin ourselves to the host view with constraints.
+/// Quick Look does not size our view and `autoresizingMask` is not enough on its own — the
+/// root can grow beyond the panel, and the controls then fall off the right edge. Hosts that
+/// have this problem opt in through `pinsToHostView`; a window does not, and must not, because
+/// a content view pinned to the window's frame view covers the title bar and the resize
+/// margins along with it.
 private final class RootView: NSView {
+
+    /// Only a host that does not size us needs this — see `pinsToHostView`.
+    var pinsToHostView = false
+
     override func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
-        guard let host = superview else { return }
+        guard pinsToHostView, let host = superview else { return }
         translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             leadingAnchor.constraint(equalTo: host.leadingAnchor),
@@ -28,6 +34,19 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
 
     /// Where the geometry comes from — in-process for an app, over XPC for an extension.
     public var geometryProvider: GeometryProvider?
+
+    /// Pin the root view to whatever it is added to, for a host that does not size it itself.
+    ///
+    /// Quick Look needs this. A window must not have it: AppKit adds a content view to the
+    /// window's private frame view, which spans the *whole* window — so pinning to it stretches
+    /// the view over the title bar and the resize borders, and the web view then swallows the
+    /// drags that would move or resize the window.
+    public var pinsToHostView = false {
+        didSet {
+            // isViewLoaded, not viewIfLoaded: the latter is macOS 14+, we target 13.
+            if isViewLoaded { (view as? RootView)?.pinsToHostView = pinsToHostView }
+        }
+    }
 
     /// Quick Look failures are otherwise invisible — this is the only trace left behind.
     /// Read with: log show --last 5m --predicate 'subsystem == "com.greegus.OpenSCADViewer"'
@@ -171,7 +190,8 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
         // We do not dictate a default window size at all — Quick Look derives the panel itself
         // and our view pins to it. Every attempt to fix a size here (preferredContentSize as
         // well as our own constraints) overrode the pinning and the view stopped tracking the window.
-        root.autoresizingMask = [.width, .height]   // fallback until there is a superview
+        root.pinsToHostView = pinsToHostView
+        root.autoresizingMask = [.width, .height]   // how a window sizes us
         view = root
         if WebGLProbe.isEnabled {
             let probe = WebGLProbe()

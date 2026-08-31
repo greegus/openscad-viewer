@@ -10,6 +10,9 @@ final class PreviewViewController: ViewerViewController {
         // An extension may not spawn OpenSCAD, so it renders through the XPC helper.
         geometryProvider = XPCGeometryProvider()
 
+        // Quick Look does not size the view it is handed, so we size ourselves to the panel.
+        pinsToHostView = true
+
         // Quick Look ignores the root view's own frame — measured: the panel stayed 800×600
         // whatever we set — but it does honour this. 20 % above that default.
         //
