@@ -187,6 +187,17 @@ never learns which host it is in — that difference used to live inside it.
     at any zoom, antialias through `fwidth`, and fade out radially from the origin instead of
     ending in a hard edge. Two pitches (100 mm and 1000 mm) plus the X and Y axes coloured in
     the same pass; the vertical axis is a separate line, since it cannot live on the ground.
+  - **Delete hides the selection** and lists it top right; clicking an entry brings it back, and
+    "Restore all" clears the list. Only a part or a whole body — hiding one face of a solid would
+    make a hole rather than remove a piece. Nothing is deleted: the mesh is rebuilt from a
+    pristine copy each time, so restoring is exact and the .scad file is never touched.
+    Rebuilt rather than discarded in a shader, because the edge overlay is its own geometry
+    derived from the mesh — a shader would leave a hidden piece's edges hanging in the air.
+    Measured on the fixture: 52 triangles -> 0 -> 52.
+  - Holding the modifier lights up the piece's **faces** as well as its outline, and those are
+    exactly the triangles Delete removes — so you see what will go before it goes. A welded
+    piece has no triangles of its own, so they are recovered by centroid containment in its box
+    and cached per piece, or a hover would redo the scan every frame.
   - **Tessellated arcs read as one edge.** A rounded corner reaches the mesh as a run of
     short chords — the mesh has no idea it was ever a circle. `buildFeatures` walks the edge
     chains (stopping at any vertex where other edges meet, so nothing merges across a

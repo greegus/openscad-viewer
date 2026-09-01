@@ -146,6 +146,38 @@ export function createInspect({ scene, view, renderer, readout }) {
     return raycaster.intersectObjects(state.meshes, false)[0] ?? null;
   }
 
+  /// Triangles of `mesh` whose centroid falls inside the piece's box.
+  ///
+  /// The union welded the panels into one solid, so a piece has no triangles of its own; this
+  /// recovers them well enough to light up its surfaces and to take it out of the view.
+  /// Computed once per piece and kept, since a hover would otherwise redo it every frame.
+  function trianglesOf(piece, mesh) {
+    const cached = piece.triangles?.get(mesh);
+    if (cached) return cached;
+
+    const pos = mesh.geometry.attributes.position;
+    const centroid = new THREE.Vector3();
+    const v = new THREE.Vector3();
+    const t = 0.5;
+    const found = [];
+
+    for (let i = 0; i < pos.count / 3; i++) {
+      centroid.set(0, 0, 0);
+      for (let k = 0; k < 3; k++) {
+        centroid.add(v.fromBufferAttribute(pos, i * 3 + k));
+      }
+      centroid.multiplyScalar(1 / 3).applyMatrix4(mesh.matrixWorld).applyMatrix4(piece.inverse);
+      if (centroid.x < piece.box.min.x - t || centroid.x > piece.box.max.x + t
+       || centroid.y < piece.box.min.y - t || centroid.y > piece.box.max.y + t
+       || centroid.z < piece.box.min.z - t || centroid.z > piece.box.max.z + t) continue;
+      found.push(i);
+    }
+
+    piece.triangles ??= new Map();
+    piece.triangles.set(mesh, found);
+    return found;
+  }
+
   /// The smallest piece whose box contains the point — panels sit inside carcasses, so the
   /// tight one is the piece actually under the cursor.
   function pieceAt(point) {
@@ -252,6 +284,11 @@ export function createInspect({ scene, view, renderer, readout }) {
                                       target.piece.outline[i + 2]));
       }
       lines.setPoints(points);
+      if (target.triangles?.length) {
+        face.geometry.dispose();
+        face.geometry = faceGeometry(target.mesh, target.triangles);
+        face.visible = true;
+      }
       const centre = new THREE.Vector3(
         (target.piece.box.min.x + target.piece.box.max.x) / 2,
         (target.piece.box.min.y + target.piece.box.max.y) / 2,
@@ -269,7 +306,9 @@ export function createInspect({ scene, view, renderer, readout }) {
       const h = hit(px);
       if (!h) return null;
       const piece = pieceAt(h.point);
-      if (piece) return { type: 'part', piece };
+      // Its surfaces as well as its outline: holding the modifier should show what would go,
+      // not just where its edges run.
+      if (piece) return { type: 'part', piece, mesh: h.object, triangles: trianglesOf(piece, h.object) };
       // No CSG box here — an extruded piece, for instance. Fall back to the welded solid.
       const info = state.groups.get(h.object);
       const triangles = info?.bodies.get(info.findBody(h.faceIndex));
@@ -454,6 +493,46 @@ export function createInspect({ scene, view, renderer, readout }) {
     return tris ? 'body' : 'no body group';
   };
 
+  /// What is selected, in the terms hiding needs: which mesh, which triangles, and which CSG
+  /// components go with it. Null for an edge or a single face — taking those out would leave a
+  /// hole rather than remove a piece.
+  const selection = () => {
+    if (!selected) return null;
+    if (selected.type === 'part') {
+      return {
+        label: shortLabel(selected),
+        mesh: selected.mesh,
+        triangles: selected.triangles ?? [],
+        componentIds: [selected.piece.id].filter((id) => id !== undefined),
+      };
+    }
+    if (selected.type === 'body') {
+      // Every component inside the body's extent goes with it.
+      const box = new THREE.Box3();
+      const pos = selected.mesh.geometry.attributes.position;
+      const v = new THREE.Vector3();
+      for (const t of selected.triangles) {
+        for (let k = 0; k < 3; k++) {
+          box.expandByPoint(v.fromBufferAttribute(pos, t * 3 + k).applyMatrix4(selected.mesh.matrixWorld));
+        }
+      }
+      const inside = state.pieces.filter((piece) => {
+        const centre = new THREE.Vector3(
+          (piece.box.min.x + piece.box.max.x) / 2,
+          (piece.box.min.y + piece.box.max.y) / 2,
+          (piece.box.min.z + piece.box.max.z) / 2).applyMatrix4(piece.world);
+        return box.containsPoint(centre);
+      });
+      return {
+        label: shortLabel(selected),
+        mesh: selected.mesh,
+        triangles: selected.triangles,
+        componentIds: inside.map((p) => p.id).filter((id) => id !== undefined),
+      };
+    }
+    return null;
+  };
+
   const debug = () => ({
     lastEvent,
     hovered: hovered ? { type: hovered.type, segments: hovered.feature?.segments.length ?? null } : null,
@@ -479,5 +558,5 @@ export function createInspect({ scene, view, renderer, readout }) {
     centre: [f.centre.x, f.centre.y, f.centre.z].map((v) => Math.round(v)),
   }));
 
-  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, arcPoint, clear, update };
+  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, arcPoint, selection, clear, update };
 }

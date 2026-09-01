@@ -26,6 +26,29 @@
     font: 600 12px -apple-system, system-ui, sans-serif;
     pointer-events: none; white-space: nowrap;
   }
+  /* Hidden pieces, top right — only present when there are any. */
+  #hidden-list {
+    position: absolute; right: 10px; top: 10px;
+    display: flex; flex-direction: column; align-items: stretch; gap: 2px;
+    padding: 6px; border-radius: 8px; min-width: 150px; max-width: 260px;
+    background: rgba(18, 20, 24, 0.55);
+    backdrop-filter: blur(14px) saturate(1.4);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
+    box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.12);
+    font: 12px -apple-system, system-ui, sans-serif;
+  }
+  .hidden-title {
+    color: rgba(255, 255, 255, 0.55);
+    padding: 2px 6px 4px; font-weight: 600;
+  }
+  .hidden-row {
+    appearance: none; border: 0; text-align: left; cursor: pointer;
+    padding: 4px 6px; border-radius: 5px;
+    background: transparent; color: rgba(255, 255, 255, 0.92);
+    font: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .hidden-row:hover { background: rgba(255, 255, 255, 0.14); }
+  .hidden-all { margin-top: 4px; color: rgba(255, 255, 255, 0.6); }
   #readout {
     position: absolute; left: 10px; bottom: 10px;
     padding: 6px 11px; border-radius: 8px;
@@ -43,6 +66,7 @@
 <canvas id="canvas"></canvas>
 <div id="status">Rendering mesh…</div>
 <div id="readout"></div>
+<div id="hidden-list" hidden></div>
 
 <script type="importmap">
 { "imports": { "three": "./vendor/three.module.min.js" } }
@@ -61,6 +85,7 @@ import { createGrid } from './grid.js';
 const canvas = document.getElementById('canvas');
 const status = document.getElementById('status');
 const readoutEl = document.getElementById('readout');
+const hiddenList = document.getElementById('hidden-list');
 const dark = matchMedia('(prefers-color-scheme: dark)').matches;
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -390,6 +415,14 @@ resize();
 
 // --- loading ---
 
+/// Hand the tools the current geometry. Needed after loading and after anything is hidden or
+/// brought back, since both tools cache edge lists built from it.
+function retarget() {
+  measure?.setTargets(parts.map((p) => ({ mesh: p.mesh, edgesGeometry: p.edges.geometry })));
+  const hiddenIds = new Set(hidden.flatMap((e) => e.componentIds ?? []));
+  inspect?.setTargets({ parts, components: components.filter((c) => !hiddenIds.has(c.id)) });
+}
+
 function clearParts() {
   for (const p of parts) {
     scene.remove(p.mesh, p.xray, p.edges);
@@ -412,7 +445,8 @@ function addPart(buffer, rgba) {
   for (const o of [mesh, xray, edges]) {
     scene.add(orientToWorld(o));
   }
-  parts.push({ mesh, xray, edges, geometry, rgba });
+  // The pristine geometry is kept: hiding rebuilds from it, so restoring is exact.
+  parts.push({ mesh, xray, edges, geometry, source: geometry.clone(), rgba });
 }
 
 /// Draws the outline of every individual piece.
@@ -451,11 +485,115 @@ function setPieces(on) {
   window.webkit?.messageHandlers?.viewer?.postMessage('pieces: ' + piecesOn);
 }
 
+// --- hiding ---
+
+/// Pieces the user has taken out of the view. Not a deletion: the geometry is rebuilt from
+/// the pristine copy each time, so restoring is exact and the model on disk is untouched.
+const hidden = [];
+
+/// Rebuilds every material mesh without its hidden triangles.
+///
+/// Rebuilding rather than flagging in a shader, because the edge overlay is its own geometry
+/// derived from the mesh — a shader that discarded triangles would leave the edges of a hidden
+/// piece hanging in the air.
+function applyHidden() {
+  for (const part of parts) {
+    const drop = new Set();
+    for (const entry of hidden) {
+      if (entry.part !== part) continue;
+      for (const t of entry.triangles) drop.add(t);
+    }
+
+    const source = part.source.attributes.position;
+    const kept = [];
+    for (let t = 0; t < source.count / 3; t++) {
+      if (drop.has(t)) continue;
+      for (let k = 0; k < 3; k++) {
+        const i = (t * 3 + k) * 3;
+        kept.push(source.array[i], source.array[i + 1], source.array[i + 2]);
+      }
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(kept, 3));
+    geometry.computeVertexNormals();
+
+    part.geometry.dispose();
+    part.geometry = geometry;
+    part.mesh.geometry = geometry;
+    part.xray.geometry = geometry;
+
+    part.edges.geometry.dispose();
+    part.edges.geometry = new THREE.EdgesGeometry(geometry, 20);
+  }
+
+  // Outlines of pieces inside something hidden must go with it.
+  const hiddenIds = new Set(hidden.flatMap((e) => e.componentIds ?? []));
+  buildPieces(components.filter((c) => !hiddenIds.has(c.id)));
+
+  retarget();
+  renderHiddenList();
+}
+
+/// Hides whatever is selected. Only a part or a whole body: hiding one face of a solid would
+/// leave a hole rather than remove anything.
+function hideSelection() {
+  const selection = inspect?.selection();
+  if (!selection?.triangles?.length) return false;
+
+  hidden.push({
+    label: selection.label,
+    part: parts.find((p) => p.mesh === selection.mesh),
+    triangles: selection.triangles,
+    componentIds: selection.componentIds,
+  });
+  inspect.clear();
+  applyHidden();
+  return true;
+}
+
+function restore(index) {
+  if (index === undefined) hidden.length = 0; else hidden.splice(index, 1);
+  applyHidden();
+}
+
+function renderHiddenList() {
+  hiddenList.hidden = hidden.length === 0;
+  hiddenList.textContent = '';
+  if (!hidden.length) return;
+
+  const title = document.createElement('div');
+  title.className = 'hidden-title';
+  title.textContent = `Hidden (${hidden.length})`;
+  hiddenList.appendChild(title);
+
+  hidden.forEach((entry, index) => {
+    const row = document.createElement('button');
+    row.className = 'hidden-row';
+    row.textContent = entry.label;
+    row.title = 'Click to bring back';
+    row.addEventListener('click', () => restore(index));
+    hiddenList.appendChild(row);
+  });
+
+  const all = document.createElement('button');
+  all.className = 'hidden-row hidden-all';
+  all.textContent = 'Restore all';
+  all.addEventListener('click', () => restore());
+  hiddenList.appendChild(all);
+}
+
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+  if (hideSelection()) event.preventDefault();
+});
+
 /// Loads either the per-material manifest or, as a fallback, one colourless mesh.
 async function load() {
   status.textContent = 'Rendering mesh…';
   try {
     clearParts();
+    hidden.length = 0;
     let source = 'materials';
     let manifest = null;
     try {
@@ -487,13 +625,13 @@ async function load() {
       scene, view, renderer,
       readout: (text) => { readoutEl.textContent = text; },
     });
-    measure.setTargets(parts.map((p) => ({ mesh: p.mesh, edgesGeometry: p.edges.geometry })));
-
     inspect ??= createInspect({
       scene, view, renderer,
       readout: (text) => { readoutEl.textContent = text; },
     });
-    inspect.setTargets({ parts, components });
+    // Only once both tools exist: retarget() feeds them both, and a tool created afterwards
+    // would silently never receive its geometry.
+    retarget();
     setTool(tool);
 
     status.textContent = '';
@@ -577,6 +715,10 @@ window.debug = {
     view.camera.position.copy(controls.target).add(offset);
     controls.update();
   },
+
+  hidden: () => hidden.map((e) => e.label),
+  hide: () => hideSelection(),
+  restore: (i) => restore(i),
 
   // Inspect: what is under the cursor, where the modifier path resolves, and a point
   // guaranteed to lie on an arc.
