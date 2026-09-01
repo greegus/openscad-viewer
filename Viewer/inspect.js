@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { toScreen, cursorPx, pointToSegment2D, pieceFeatures, featureUnderCursor,
-         axisName, trianglesTouchingBox, clipToBox, MODEL_TO_WORLD } from './picking.js';
+         axisName, pieceFaces, assignTriangles, trianglesTouchingBox, clipToBox,
+         MODEL_TO_WORLD } from './picking.js';
 import { createStroke } from './strokes.js';
 
 /// Inspect: hover highlights what is under the cursor, a click selects it.
@@ -117,6 +118,30 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     // feature belongs to exactly one piece by construction rather than by being trimmed later.
     state.pieces = pieces ?? [];
     state.features = pieceFeatures(state.pieces);
+
+    // Faces come from the CSG and the mesh is asked only which triangles cover each one. The
+    // other way round — grouping triangles by coplanarity — cannot say that a cylindrical wall
+    // is one face rather than 96 strips, nor that two boards welded flush do not share a face.
+    state.faceOf = new Map();       // mesh -> (triangle index -> face)
+    state.faceTriangles = new Map(); // face -> { mesh, triangles }
+    for (const mesh of state.meshes) state.faceOf.set(mesh, new Map());
+
+    for (const piece of state.pieces) {
+      const faces = pieceFaces(piece);
+      for (const mesh of state.meshes) {
+        const near = trianglesTouchingBox(mesh, piece.source ?? piece);
+        if (!near.length) continue;
+        const groups = assignTriangles(mesh, faces, near);
+        for (const [face, triangles] of groups) {
+          if (!triangles.length) continue;
+          const already = state.faceTriangles.get(face);
+          if (already) already.triangles.push(...triangles);
+          else state.faceTriangles.set(face, { mesh, triangles });
+          const lookup = state.faceOf.get(mesh);
+          for (const t of triangles) if (!lookup.has(t)) lookup.set(t, face);
+        }
+      }
+    }
     clear();
   }
 
@@ -297,8 +322,15 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     const info = state.groups.get(h.object);
     if (!info) return null;
     const triangles = info.groups.get(info.find(h.faceIndex)) ?? [h.faceIndex];
-    // The piece the cursor is over, so the highlight can stop at its edge: CGAL welds coplanar
-    // faces, and the right side of a unit can be one rectangle spanning several boards.
+    // The CSG face this triangle belongs to, when there is one. It carries its own identity, so
+    // a curved wall arrives whole and a plane stops where the piece stops.
+    const face = state.faceOf.get(h.object)?.get(h.faceIndex);
+    if (face) {
+      const group = state.faceTriangles.get(face);
+      return { type: 'face', face, mesh: group.mesh, triangles: group.triangles,
+               point: h.point, piece: face.piece,
+               normal: face.kind === 'plane' ? face.normal : info.planes[h.faceIndex].normal };
+    }
     return { type: 'face', mesh: h.object, triangles, point: h.point,
              piece: pieceAt(h.point), normal: info.planes[h.faceIndex].normal };
   }
@@ -316,7 +348,9 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     if (target.type === 'edge') {
       return { name: target.feature.type === 'arc' ? 'Arc' : 'Edge', id: null };
     }
-    return { name: target.type === 'body' ? 'Body' : 'Face', id: null };
+    if (target.type === 'body') return { name: 'Body', id: null };
+    const round = target.face?.kind === 'cylinder';
+    return { name: round ? 'Round face' : 'Face', id: target.face?.piece?.id ?? null };
   }
 
   /// Description as label/value pairs, listed one per line under the heading. A single run-on
@@ -357,6 +391,14 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
         ['Size', `${mm(b.x)} × ${mm(b.y)} × ${mm(b.z)} mm`],
         ['Triangles', String(target.triangles.length)],
         ['Note', 'no CSG box — extruded shape'],
+      ];
+    }
+    if (target.face?.kind === 'cylinder') {
+      // One surface, however many strips it was tessellated into.
+      return [
+        ['Surface', 'cylindrical'],
+        ['Radius', `${mm(target.face.radius)} mm`],
+        ['Triangles', String(target.triangles.length)],
       ];
     }
     const f = faceInfo(target.mesh, target.triangles, target.normal);

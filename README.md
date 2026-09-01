@@ -143,6 +143,21 @@ never learns which host it is in — that difference used to live inside it.
 - **The control row** lives in one `NSStackView`, centred while it fits and clamped to the
   left edge when it does not: the left constraint is required, the right one optional, so a
   row too wide for the panel gives way on the right instead of hiding the mode picker.
+### What counts as a face
+
+A face is a **surface with identity**, not a set of triangles: a cylindrical wall is one face
+bounded by two circles however many strips it was tessellated into, and two boards welded flush
+share a plane without sharing a face. Grouping triangles by coplanarity can express neither, so
+faces come from the CSG — a box has six planes, an extruded profile two caps plus one face per
+run of its outline (a curved run giving a cylinder), and every cut contributes the surface it
+leaves, so a drilled hole gives the piece a cylindrical wall it did not have before.
+
+The mesh is then asked only which triangles cover each face, matched by position and orientation;
+a triangle matching none is left out rather than guessed at. Sides are split on the same turn
+threshold the edges use, so a face and the edge bounding it always agree on where the curve
+begins. Measured on `Tests/cylinder.scad`: six planes and two cylinders account for all 1152
+triangles with none left over, and the wall of a hole reads as one face of 368 triangles.
+
 A shaped cut is clipped against its **prism**, not its bounding box, and contributes the rim it
 leaves where it enters and leaves the piece. The box will not do: a cylinder of radius half the
 side has a box the size of the whole cube, and clipping against that erases every edge the cube

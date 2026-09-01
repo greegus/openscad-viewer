@@ -163,6 +163,167 @@ export function buildPieceModel(components) {
   });
 }
 
+/// The faces of a piece, as surfaces with identity — not as groups of triangles.
+///
+/// This is the distinction that matters: a cylindrical wall is *one* face bounded by two circles,
+/// even though it arrives as 96 tessellated strips, and two boards welded flush share a plane
+/// without sharing a face. Grouping triangles by coplanarity cannot express either. So the faces
+/// come from the CSG, and the mesh is consulted afterwards only to find which triangles cover
+/// each one.
+///
+/// A face is a plane or a cylinder in world coordinates, which is all the shapes this reader
+/// produces: boxes, extruded profiles (a cylinder being the extrusion of a circle), and the cuts
+/// taken out of them. A cut contributes its own surface — a drilled hole gives the piece a
+/// cylindrical wall it did not have before.
+export function pieceFaces(piece) {
+  const faces = [];
+  const source = piece.source ?? {};
+  const toWorld = piece.world;
+
+  const plane = (p0, n, label) => faces.push({
+    kind: 'plane', label,
+    point: p0.clone().applyMatrix4(toWorld),
+    normal: n.clone().transformDirection(toWorld).normalize(),
+    piece,
+  });
+  const cylinder = (p0, axis, radius, label) => faces.push({
+    kind: 'cylinder', label, radius,
+    point: p0.clone().applyMatrix4(toWorld),
+    axis: axis.clone().transformDirection(toWorld).normalize(),
+    piece,
+  });
+
+  addSurfaces(source, piece.box, plane, cylinder, '');
+
+  // Every cut adds the surface it leaves behind, in the piece's coordinates.
+  for (const cut of source.cutters ?? []) {
+    const box = prepareBox(cut);
+    // Cut space into the piece's own space. The cutter's matrix reaches model space, and
+    // `piece.inverse` reaches back from the world, so MODEL_TO_WORLD sits between them —
+    // leaving it out applies the piece's own transform twice.
+    const cutToPiece = new THREE.Matrix4()
+      .multiplyMatrices(piece.inverse, MODEL_TO_WORLD)
+      .multiply(box.matrix);
+    const place = (v) => v.clone().applyMatrix4(cutToPiece);
+    const dir = (v) => v.clone().transformDirection(cutToPiece);
+    addSurfaces(cut, box, (p0, n, label) => plane(place(p0), dir(n), label),
+                (p0, axis, radius, label) => cylinder(place(p0), dir(axis), radius, label),
+                'cut ');
+  }
+  return faces;
+}
+
+/// The surfaces of one primitive — a box, or a profile extruded along z.
+function addSurfaces(source, box, plane, cylinder, prefix) {
+  const { min, max } = box;
+
+  if (!source.profile) {
+    plane(new THREE.Vector3(min.x, 0, 0), new THREE.Vector3(-1, 0, 0), prefix + 'face');
+    plane(new THREE.Vector3(max.x, 0, 0), new THREE.Vector3(1, 0, 0), prefix + 'face');
+    plane(new THREE.Vector3(0, min.y, 0), new THREE.Vector3(0, -1, 0), prefix + 'face');
+    plane(new THREE.Vector3(0, max.y, 0), new THREE.Vector3(0, 1, 0), prefix + 'face');
+    plane(new THREE.Vector3(0, 0, min.z), new THREE.Vector3(0, 0, -1), prefix + 'face');
+    plane(new THREE.Vector3(0, 0, max.z), new THREE.Vector3(0, 0, 1), prefix + 'face');
+    return;
+  }
+
+  // Caps.
+  plane(new THREE.Vector3(0, 0, min.z), new THREE.Vector3(0, 0, -1), prefix + 'bottom');
+  plane(new THREE.Vector3(0, 0, max.z), new THREE.Vector3(0, 0, 1), prefix + 'top');
+
+  // The side, run by run: a straight stretch of profile is one plane, a curved stretch one
+  // cylinder. Splitting on the same turn threshold the features use, so a face and the edge
+  // bounding it always agree on where the curve begins.
+  const profile = source.profile.map(([x, y]) => new THREE.Vector2(x, y));
+  const n = profile.length;
+  const turn = (i) => {
+    const a = profile[(i - 1 + n) % n], b = profile[i], c = profile[(i + 1) % n];
+    const u = b.clone().sub(a).normalize();
+    const v = c.clone().sub(b).normalize();
+    return Math.acos(Math.max(-1, Math.min(1, u.dot(v))));
+  };
+  const STRAIGHT = 1.5 * Math.PI / 180;
+
+  let i = 0;
+  while (i < n) {
+    const curved = turn(i) > STRAIGHT;
+    let j = i;
+    while (j + 1 < n && (turn(j + 1) > STRAIGHT) === curved) j++;
+
+    if (curved) {
+      const a = profile[i], b = profile[Math.floor((i + j) / 2)], c = profile[j];
+      const fit = circleThrough2D(a, b, c);
+      if (fit) {
+        cylinder(new THREE.Vector3(fit.centre.x, fit.centre.y, min.z),
+                 new THREE.Vector3(0, 0, 1), fit.radius, prefix + 'round side');
+      }
+    } else {
+      const a = profile[i], b = profile[(j + 1) % n];
+      const edge = b.clone().sub(a);
+      if (edge.lengthSq() > 1e-12) {
+        const outward = new THREE.Vector2(edge.y, -edge.x).normalize();
+        plane(new THREE.Vector3(a.x, a.y, min.z),
+              new THREE.Vector3(outward.x, outward.y, 0), prefix + 'side');
+      }
+    }
+    i = j + 1;
+  }
+}
+
+/// Circle through three points in 2D, or null when they are in a line.
+function circleThrough2D(a, b, c) {
+  const d = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+  if (Math.abs(d) < 1e-9) return null;
+  const ux = (a.lengthSq() * (b.y - c.y) + b.lengthSq() * (c.y - a.y) + c.lengthSq() * (a.y - b.y)) / d;
+  const uy = (a.lengthSq() * (c.x - b.x) + b.lengthSq() * (a.x - c.x) + c.lengthSq() * (b.x - a.x)) / d;
+  const centre = new THREE.Vector2(ux, uy);
+  return { centre, radius: centre.distanceTo(a) };
+}
+
+/// Which face each triangle of `mesh` covers, as a Map from face to triangle indices.
+///
+/// The mesh supplies pixels, the CSG supplies identity: a triangle is matched to the face whose
+/// surface it lies on and whose orientation it shares. A triangle matching nothing is left out
+/// rather than guessed at — better a face that is slightly short than one that swallows its
+/// neighbour.
+export function assignTriangles(mesh, faces, candidates = null) {
+  const position = mesh.geometry.attributes.position;
+  const groups = new Map(faces.map((f) => [f, []]));
+  // Only the triangles near this piece, when the caller knows which those are: matching every
+  // triangle against every face in the design is millions of tests at load time.
+  const indices = candidates ?? Array.from({ length: position.count / 3 }, (_, i) => i);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const centroid = new THREE.Vector3(), normal = new THREE.Vector3();
+  const offset = new THREE.Vector3();
+
+  for (const t of indices) {
+    a.fromBufferAttribute(position, t * 3).applyMatrix4(mesh.matrixWorld);
+    b.fromBufferAttribute(position, t * 3 + 1).applyMatrix4(mesh.matrixWorld);
+    c.fromBufferAttribute(position, t * 3 + 2).applyMatrix4(mesh.matrixWorld);
+    centroid.copy(a).add(b).add(c).multiplyScalar(1 / 3);
+    normal.copy(b).sub(a).cross(c.clone().sub(a));
+    if (normal.lengthSq() < 1e-18) continue;
+    normal.normalize();
+
+    for (const face of faces) {
+      if (face.kind === 'plane') {
+        if (Math.abs(normal.dot(face.normal)) < 0.995) continue;
+        if (Math.abs(offset.copy(centroid).sub(face.point).dot(face.normal)) > 0.05) continue;
+      } else {
+        // Perpendicular distance to the axis, against the radius. The tolerance absorbs
+        // tessellation: a facet's centroid sits a little inside the true circle.
+        if (Math.abs(normal.dot(face.axis)) > 0.05) continue;
+        offset.copy(centroid).sub(face.point);
+        offset.addScaledVector(face.axis, -offset.dot(face.axis));
+        if (Math.abs(offset.length() - face.radius) > 0.3) continue;
+      }
+      groups.get(face).push(t);
+      break;
+    }
+  }
+  return groups;
+}
+
 /// Pickable features, grouped per piece.
 ///
 /// Built one piece at a time on purpose: a feature then cannot span two pieces, which is what
@@ -304,6 +465,17 @@ function insideOverlap(a, b, overlap) {
     }
   }
   return [t0, t1];
+}
+
+/// Mesh vertices into a piece's own coordinates.
+///
+/// A piece's box comes from the CSG and lives in model space (Z up); a mesh sits in the scene
+/// (Y up). Skipping MODEL_TO_WORLD here puts every vertex outside every box — silently, since
+/// the result is simply "nothing matched".
+function meshToPiece(mesh, box) {
+  const worldToModel = new THREE.Matrix4().copy(MODEL_TO_WORLD).invert();
+  return new THREE.Matrix4()
+    .multiplyMatrices(box.inverse, new THREE.Matrix4().multiplyMatrices(worldToModel, mesh.matrixWorld));
 }
 
 /// Clips world-space triangles to a piece's box, as a flat array of positions.

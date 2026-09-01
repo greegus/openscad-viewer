@@ -152,7 +152,7 @@ import { STLLoader } from './vendor/STLLoader.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { createMeasure } from './measure.js';
 import { createInspect } from './inspect.js';
-import { buildPieceModel, trianglesInBox, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
+import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
 import { updateStrokeResolution } from './strokes.js';
 import { createGrid } from './grid.js';
 import { createPalette } from './palette.js';
@@ -996,7 +996,37 @@ window.debug = {
   },
 
   components: () => components,
+  /// Camera, target and what the scene actually spans — for telling "the model is elsewhere"
+  /// apart from "picking is broken".
+  cameraState: () => {
+    const box = new THREE.Box3();
+    for (const p of parts) box.expandByObject(p.mesh);
+    const size = box.getSize(new THREE.Vector3());
+    const centre = box.getCenter(new THREE.Vector3());
+    return {
+      camera: [view.camera.position.x, view.camera.position.y, view.camera.position.z].map(Math.round),
+      target: [controls.target.x, controls.target.y, controls.target.z].map(Math.round),
+      partsBox: [size.x, size.y, size.z].map(Math.round),
+      partsCentre: [centre.x, centre.y, centre.z].map(Math.round),
+      ortho: view.camera.isOrthographicCamera
+        ? [view.camera.left, view.camera.right, view.camera.top, view.camera.bottom].map(Math.round)
+        : null,
+      zoom: view.camera.zoom, near: Math.round(view.camera.near), far: Math.round(view.camera.far),
+    };
+  },
   features: () => inspect?.features() ?? [],
+  /// The CSG faces of a piece and how much of the mesh each one covers — for checking that
+  /// identity comes from the CSG and the mesh only supplies pixels.
+  facesOf: (id) => {
+    const piece = pieceModel.find((p) => p.id === id);
+    if (!piece) return null;
+    const faces = pieceFaces(piece);
+    const counts = parts.map((part) => assignTriangles(part.mesh, faces));
+    return faces.map((f, i) => ({
+      kind: f.kind, label: f.label, radius: f.radius ? Math.round(f.radius) : undefined,
+      triangles: counts.reduce((n, m) => n + (m.get(f)?.length ?? 0), 0),
+    }));
+  },
   longestFeature: () => inspect?.longestFeature() ?? null,
   setOcclusion: (on) => inspect?.setOcclusion(on),
   edgesInPiece: (id) => inspect?.edgesInPiece(id) ?? null,
