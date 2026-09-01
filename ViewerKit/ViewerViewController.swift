@@ -63,7 +63,9 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
     /// The initial camera is a three-quarter view, which is not one of these — so the picker
     /// starts with nothing selected rather than claiming a direction the camera is not on.
     private static let views: [(title: String, id: String)] = [
-        ("Front", "front"), ("Left", "left"), ("Right", "right"), ("Top", "top"),
+        ("Front", "front"), ("Back", "back"),
+        ("Left", "left"), ("Right", "right"),
+        ("Top", "top"), ("Bottom", "bottom"),
     ]
 
     /// Inspection tools. Mutually exclusive, and both can be off.

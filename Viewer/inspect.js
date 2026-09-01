@@ -146,31 +146,35 @@ export function createInspect({ scene, view, renderer, readout }) {
     return raycaster.intersectObjects(state.meshes, false)[0] ?? null;
   }
 
-  /// Triangles of `mesh` whose centroid falls inside the piece's box.
+  /// Triangles of `mesh` that lie wholly inside the piece's box.
   ///
-  /// The union welded the panels into one solid, so a piece has no triangles of its own; this
-  /// recovers them well enough to light up its surfaces and to take it out of the view.
+  /// The union welded the panels into one solid, so a piece owns no triangles; this recovers
+  /// them well enough to light up its surfaces and to take it out of the view.
+  ///
+  /// Every vertex must be inside, not just the centroid. The welded mesh has triangles that
+  /// span several panels, and a centroid test claimed those for whichever box happened to
+  /// contain their middle — hiding one panel then tore a wedge out of its neighbours. Erring
+  /// this way leaves a sliver of a piece behind at worst, instead of damaging something else.
+  ///
   /// Computed once per piece and kept, since a hover would otherwise redo it every frame.
   function trianglesOf(piece, mesh) {
     const cached = piece.triangles?.get(mesh);
     if (cached) return cached;
 
     const pos = mesh.geometry.attributes.position;
-    const centroid = new THREE.Vector3();
     const v = new THREE.Vector3();
     const t = 0.5;
     const found = [];
 
     for (let i = 0; i < pos.count / 3; i++) {
-      centroid.set(0, 0, 0);
-      for (let k = 0; k < 3; k++) {
-        centroid.add(v.fromBufferAttribute(pos, i * 3 + k));
+      let inside = true;
+      for (let k = 0; k < 3 && inside; k++) {
+        v.fromBufferAttribute(pos, i * 3 + k).applyMatrix4(mesh.matrixWorld).applyMatrix4(piece.inverse);
+        inside = v.x >= piece.box.min.x - t && v.x <= piece.box.max.x + t
+              && v.y >= piece.box.min.y - t && v.y <= piece.box.max.y + t
+              && v.z >= piece.box.min.z - t && v.z <= piece.box.max.z + t;
       }
-      centroid.multiplyScalar(1 / 3).applyMatrix4(mesh.matrixWorld).applyMatrix4(piece.inverse);
-      if (centroid.x < piece.box.min.x - t || centroid.x > piece.box.max.x + t
-       || centroid.y < piece.box.min.y - t || centroid.y > piece.box.max.y + t
-       || centroid.z < piece.box.min.z - t || centroid.z > piece.box.max.z + t) continue;
-      found.push(i);
+      if (inside) found.push(i);
     }
 
     piece.triangles ??= new Map();

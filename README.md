@@ -121,11 +121,15 @@ never learns which host it is in — that difference used to live inside it.
   plane in the thousands, NDC depth is non-linear enough that a small clip-space nudge is
   worth centimetres in world space, more than a panel is thick, so edges occluded by other
   panels punch straight through.
-- **Projection**: `Persp` / `Iso`, isometric (orthographic) by default — parallel edges stay
+- **Projection**: `Persp` / `Iso`, isometric (orthographic) by default. Both cameras get clip
+  planes derived from the model's extent — a perspective camera's defaults (0.1 to 1000) are
+  nowhere near a design measured in millimetres, so switching to it used to show an empty view
+  with the whole model beyond the far plane. The swap also carries the framing across, undoing
+  the orthographic zoom that pinch changes, so the view does not jump — parallel edges stay
   parallel, so thicknesses can be compared across the model without foreshortening. Two camera
   objects are swapped in place; the tools are handed a `view` holder rather than a camera, so
   they always read the active one instead of one captured at construction.
-- **Standard views**: `Front` / `Left` / `Right` / `Top`, given in the model's own axes
+- **Standard views**: `Front` / `Back` / `Left` / `Right` / `Top` / `Bottom`, given in the model's own axes
   (OpenSCAD is Z-up) and rotated into three.js space. They keep the current distance and
   target, so switching direction does not also re-zoom. Verified by reading the camera
   direction back in model axes: front `[0,-1,0]`, left `[-1,0,0]`, right `[1,0,0]`,
@@ -194,6 +198,11 @@ never learns which host it is in — that difference used to live inside it.
     Rebuilt rather than discarded in a shader, because the edge overlay is its own geometry
     derived from the mesh — a shader would leave a hidden piece's edges hanging in the air.
     Measured on the fixture: 52 triangles -> 0 -> 52.
+    A triangle belongs to a piece only when it lies *wholly* inside its box. The welded mesh
+    has triangles spanning several panels, and matching on the centroid alone handed those to
+    whichever box held their middle — hiding one panel then tore a wedge out of its neighbours.
+    Measured on kniznica.scad piece #47 (15 x 450 x 1220): the removed triangles now span
+    exactly 15 x 450 x 1220, not a millimetre beyond.
   - Holding the modifier lights up the piece's **faces** as well as its outline, and those are
     exactly the triangles Delete removes — so you see what will go before it goes. A welded
     piece has no triangles of its own, so they are recovered by centroid containment in its box
