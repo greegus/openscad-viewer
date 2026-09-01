@@ -296,6 +296,13 @@ export function assignTriangles(mesh, faces, candidates = null) {
   const centroid = new THREE.Vector3(), normal = new THREE.Vector3();
   const offset = new THREE.Vector3();
 
+  // Curved surfaces are tested first, and this is not a detail: a cylinder tangent to a wall
+  // touches it along a line, and there its surface is locally coplanar with the wall and shares
+  // its normal. With planes tested first, the facets along that tangent were claimed by the wall
+  // — two tangent lines crossing on one face drew a star of wall-coloured strips through the
+  // middle of the cut. The more specific surface has to win.
+  const ordered = [...faces].sort((a, b) => (a.kind === 'cylinder' ? -1 : 0) - (b.kind === 'cylinder' ? -1 : 0));
+
   for (const t of indices) {
     a.fromBufferAttribute(position, t * 3).applyMatrix4(mesh.matrixWorld);
     b.fromBufferAttribute(position, t * 3 + 1).applyMatrix4(mesh.matrixWorld);
@@ -305,18 +312,22 @@ export function assignTriangles(mesh, faces, candidates = null) {
     if (normal.lengthSq() < 1e-18) continue;
     normal.normalize();
 
-    for (const face of faces) {
-      if (face.kind === 'plane') {
-        if (Math.abs(normal.dot(face.normal)) < 0.995) continue;
-        if (Math.abs(offset.copy(centroid).sub(face.point).dot(face.normal)) > 0.05) continue;
-      } else {
-        // Perpendicular distance to the axis, against the radius. The tolerance absorbs
-        // tessellation: a facet's centroid sits a little inside the true circle.
-        if (Math.abs(normal.dot(face.axis)) > 0.05) continue;
-        offset.copy(centroid).sub(face.point);
-        offset.addScaledVector(face.axis, -offset.dot(face.axis));
-        if (Math.abs(offset.length() - face.radius) > 0.3) continue;
+    for (const face of ordered) {
+      // Every vertex, not the centroid: a facet lying across a curve has its centroid pulled
+      // inside, and on a tangent that is exactly what made it look like part of the plane.
+      let fits = true;
+      for (const p of [a, b, c]) {
+        if (face.kind === 'plane') {
+          if (Math.abs(normal.dot(face.normal)) < 0.995) { fits = false; break; }
+          if (Math.abs(offset.copy(p).sub(face.point).dot(face.normal)) > 0.02) { fits = false; break; }
+        } else {
+          if (Math.abs(normal.dot(face.axis)) > 0.05) { fits = false; break; }
+          offset.copy(p).sub(face.point);
+          offset.addScaledVector(face.axis, -offset.dot(face.axis));
+          if (Math.abs(offset.length() - face.radius) > 0.05) { fits = false; break; }
+        }
       }
+      if (!fits) continue;
       groups.get(face).push(t);
       break;
     }

@@ -152,6 +152,13 @@ faces come from the CSG — a box has six planes, an extruded profile two caps p
 run of its outline (a curved run giving a cylinder), and every cut contributes the surface it
 leaves, so a drilled hole gives the piece a cylindrical wall it did not have before.
 
+Curved surfaces are matched first, and that ordering is load-bearing. A cylinder tangent to a
+wall touches it along a line, and there its surface is locally coplanar with the wall and shares
+its normal — so with planes matched first, the facets along that tangent were claimed by the
+wall. Two tangent lines crossing on one face drew a star of wall-coloured strips through the
+middle of the cut. The more specific surface has to win, and every vertex is tested rather than
+the centroid, which on a curve is pulled inside and looks flatter than the facet is.
+
 The mesh is then asked only which triangles cover each face, matched by position and orientation;
 a triangle matching none is left out rather than guessed at. Sides are split on the same turn
 threshold the edges use, so a face and the edge bounding it always agree on where the curve

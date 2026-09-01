@@ -212,26 +212,42 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
         .cross(new THREE.Vector3().subVectors(tri[2], tri[0])).length() / 2;
     }
 
-    // In-plane axes: take the longest edge as u, so a rectangle reports its true sides.
-    let u = null, best = 0;
-    for (const t of triangles) {
+    // In-plane axes: the pair giving the *smallest* box, not the longest edge.
+    //
+    // The longest edge of a square split into two triangles is its diagonal, so a 100 mm face
+    // measured 141.4 x 141.4 — its own diagonal, twice. Candidates are the model's axes and the
+    // face's own edge directions, projected into the plane; the smallest enclosing box is the
+    // one a joiner would call the size.
+    const candidates = [];
+    for (const axis of [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0),
+                        new THREE.Vector3(0, 0, 1)]) {
+      const d = axis.clone().addScaledVector(normal, -axis.dot(normal));
+      if (d.lengthSq() > 1e-6) candidates.push(d.normalize());
+    }
+    for (const t of triangles.slice(0, 64)) {
       for (let k = 0; k < 3; k++) {
-        const a = new THREE.Vector3().fromBufferAttribute(pos, t * 3 + k).applyMatrix4(mesh.matrixWorld);
-        const b = new THREE.Vector3().fromBufferAttribute(pos, t * 3 + (k + 1) % 3).applyMatrix4(mesh.matrixWorld);
-        const d = b.sub(a);
-        if (d.length() > best) { best = d.length(); u = d.normalize(); }
+        const p = new THREE.Vector3().fromBufferAttribute(pos, t * 3 + k).applyMatrix4(mesh.matrixWorld);
+        const q = new THREE.Vector3().fromBufferAttribute(pos, t * 3 + (k + 1) % 3).applyMatrix4(mesh.matrixWorld);
+        const d = q.sub(p).addScaledVector(normal, 0);
+        if (d.lengthSq() > 1e-6) candidates.push(d.normalize());
       }
     }
-    if (!u) return { area, width: 0, height: 0 };
-    const w = new THREE.Vector3().crossVectors(normal, u).normalize();
+    if (!candidates.length) return { area, width: 0, height: 0 };
 
-    let u0 = Infinity, u1 = -Infinity, w0 = Infinity, w1 = -Infinity;
-    for (const p of verts) {
-      const a = p.dot(u), b = p.dot(w);
-      u0 = Math.min(u0, a); u1 = Math.max(u1, a);
-      w0 = Math.min(w0, b); w1 = Math.max(w1, b);
+    let bestBox = null;
+    for (const u of candidates) {
+      const w = new THREE.Vector3().crossVectors(normal, u).normalize();
+      if (w.lengthSq() < 1e-9) continue;
+      let u0 = Infinity, u1 = -Infinity, w0 = Infinity, w1 = -Infinity;
+      for (const p of verts) {
+        const a = p.dot(u), b = p.dot(w);
+        u0 = Math.min(u0, a); u1 = Math.max(u1, a);
+        w0 = Math.min(w0, b); w1 = Math.max(w1, b);
+      }
+      const box = { width: u1 - u0, height: w1 - w0 };
+      if (!bestBox || box.width * box.height < bestBox.width * bestBox.height) bestBox = box;
     }
-    return { area, width: u1 - u0, height: w1 - w0 };
+    return { area, width: bestBox.width, height: bestBox.height };
   }
 
   /// Extent of a set of triangles, reported in the model's own axes (Z-up).
@@ -738,6 +754,8 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     lastEvent,
     hovered: hovered ? {
       type: hovered.type,
+      faceKind: hovered.face?.kind ?? null,
+      faceLabel: hovered.face?.label ?? null,
       segments: hovered.feature?.segments.length ?? null,
       triangles: hovered.triangles?.length ?? null,
     } : null,
