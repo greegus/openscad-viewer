@@ -214,9 +214,50 @@ function overlapInPieceSpace(piece, cutter) {
       }
     }
   }
+
+  // Which bounds had to be pulled in to the piece: those faces of the overlap lie on the
+  // piece's own surface rather than being a wall the cut left behind. The distinction is
+  // what tells a real pocket edge from a phantom one — see `overlapEdges`.
+  const eps = 1e-6;
+  const lo = ['x', 'y', 'z'].map((k) => box.min[k] <= piece.min[k] + eps);
+  const hi = ['x', 'y', 'z'].map((k) => box.max[k] >= piece.max[k] - eps);
   box.min.max(piece.min);
   box.max.min(piece.max);
-  return box.isEmpty() ? null : box;
+  return box.isEmpty() ? null : { box, lo, hi };
+}
+
+/// Edges of the overlap that are genuinely edges of the cut piece.
+///
+/// An edge runs along one axis and is fixed at a bound on the other two. Each of those bounds
+/// is either a wall the cut left inside the piece, or the piece's own surface. If *both* are
+/// the piece's own surface the edge is a stretch of the piece's original edge — and that
+/// stretch is exactly the material the cut removed, so drawing it puts back a line through
+/// empty space.
+function overlapEdges({ box, lo, hi }, matrix) {
+  const min = [box.min.x, box.min.y, box.min.z];
+  const max = [box.max.x, box.max.y, box.max.z];
+  const flush = (axis, side) => (side === 0 ? lo[axis] : hi[axis]);
+
+  const edges = [];
+  for (let a = 0; a < 3; a++) {
+    const b = (a + 1) % 3;
+    const c = (a + 2) % 3;
+    for (const sb of [0, 1]) {
+      for (const sc of [0, 1]) {
+        if (flush(b, sb) && flush(c, sc)) continue;
+        const from = [], to = [];
+        from[b] = to[b] = sb ? max[b] : min[b];
+        from[c] = to[c] = sc ? max[c] : min[c];
+        from[a] = min[a];
+        to[a] = max[a];
+        edges.push([
+          new THREE.Vector3(...from).applyMatrix4(matrix),
+          new THREE.Vector3(...to).applyMatrix4(matrix),
+        ]);
+      }
+    }
+  }
+  return edges;
 }
 
 /// The outline of one piece, in model space, with the material removed by `difference()`
@@ -251,7 +292,7 @@ export function pieceOutline(component) {
     const overlap = overlapInPieceSpace(box, cutter);
     if (!overlap) return;
     const others = cutters.filter((_, i) => i !== index);
-    emit(boxEdges(overlap.min, overlap.max, box.matrix), others);
+    emit(overlapEdges(overlap, box.matrix), others);
   });
 
   return points;
