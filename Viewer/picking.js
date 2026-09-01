@@ -186,35 +186,74 @@ function surviving(a, b, cutters) {
   return spans;
 }
 
-/// The outline of one piece, in model space, with the material removed by `difference()`
-/// clipped away. Without the clipping an edge is drawn straight across a milled groove —
-/// that edge belongs to the original box, not to the object the CSG produced.
-export function pieceOutline(component) {
-  const box = prepareBox(component);
-  const cutters = (component.cutters ?? []).map(prepareBox);
-
-  const [sx, sy, sz] = component.size;
-  const c = [box.min, box.max];
-  const corner = (i, j, k) => new THREE.Vector3(c[i].x, c[j].y, c[k].z).applyMatrix4(box.matrix);
-
-  const segments = [];
+/// The 12 edges of a box, as pairs of world-space points.
+function boxEdges(min, max, matrix) {
+  const c = [min, max];
+  const at = (i, j, k) => new THREE.Vector3(c[i].x, c[j].y, c[k].z).applyMatrix4(matrix);
+  const out = [];
   for (const [f, t] of [
     [[0, 0, 0], [1, 0, 0]], [[1, 0, 0], [1, 1, 0]], [[1, 1, 0], [0, 1, 0]], [[0, 1, 0], [0, 0, 0]],
     [[0, 0, 1], [1, 0, 1]], [[1, 0, 1], [1, 1, 1]], [[1, 1, 1], [0, 1, 1]], [[0, 1, 1], [0, 0, 1]],
     [[0, 0, 0], [0, 0, 1]], [[1, 0, 0], [1, 0, 1]], [[1, 1, 0], [1, 1, 1]], [[0, 1, 0], [0, 1, 1]],
-  ]) {
-    segments.push([corner(...f), corner(...t)]);
-  }
+  ]) out.push([at(...f), at(...t)]);
+  return out;
+}
 
-  const points = [];
-  for (const [a, b] of segments) {
-    for (const [t0, t1] of cutters.length ? surviving(a, b, cutters) : [[0, 1]]) {
-      if (t1 - t0 < 1e-9) continue;
-      const from = a.clone().lerp(b, t0);
-      const to = a.clone().lerp(b, t1);
-      points.push(from.x, from.y, from.z, to.x, to.y, to.z);
+/// Where a cutter overlaps the piece, in the piece's own coordinates.
+///
+/// The cutter's corners are transformed into piece space and bounded — exact while both are
+/// axis-aligned, which is every cut in practice, and a safe over-estimate if one is rotated.
+function overlapInPieceSpace(piece, cutter) {
+  const toPiece = new THREE.Matrix4().multiplyMatrices(piece.inverse, cutter.matrix);
+  const box = new THREE.Box3();
+  const v = new THREE.Vector3();
+  for (const x of [cutter.min.x, cutter.max.x]) {
+    for (const y of [cutter.min.y, cutter.max.y]) {
+      for (const z of [cutter.min.z, cutter.max.z]) {
+        box.expandByPoint(v.set(x, y, z).applyMatrix4(toPiece));
+      }
     }
   }
+  box.min.max(piece.min);
+  box.max.min(piece.max);
+  return box.isEmpty() ? null : box;
+}
+
+/// The outline of one piece, in model space, with the material removed by `difference()`
+/// clipped away. Without the clipping an edge is drawn straight across a milled groove —
+/// that edge belongs to the original box, not to the object the CSG produced.
+///
+/// Clipping alone is not enough, though: a cut also *creates* edges, around the pocket it
+/// leaves behind. Without them an outline arrives at a groove and simply stops, instead of
+/// running around the milled shape and rejoining the rest of the piece. So the overlap
+/// between piece and cutter contributes its own edges too.
+export function pieceOutline(component) {
+  const box = prepareBox(component);
+  const cutters = (component.cutters ?? []).map(prepareBox);
+
+  const points = [];
+  const emit = (segments, against) => {
+    for (const [a, b] of segments) {
+      for (const [t0, t1] of against.length ? surviving(a, b, against) : [[0, 1]]) {
+        if (t1 - t0 < 1e-9) continue;
+        const from = a.clone().lerp(b, t0);
+        const to = a.clone().lerp(b, t1);
+        points.push(from.x, from.y, from.z, to.x, to.y, to.z);
+      }
+    }
+  };
+
+  // The piece's own edges, with the cut-away spans removed.
+  emit(boxEdges(box.min, box.max, box.matrix), cutters);
+
+  // The edges each cut leaves behind, minus anything a *later* cut removed in turn.
+  cutters.forEach((cutter, index) => {
+    const overlap = overlapInPieceSpace(box, cutter);
+    if (!overlap) return;
+    const others = cutters.filter((_, i) => i !== index);
+    emit(boxEdges(overlap.min, overlap.max, box.matrix), others);
+  });
+
   return points;
 }
 
