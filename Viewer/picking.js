@@ -203,6 +203,114 @@ function boxEdges(min, max, matrix) {
   return out;
 }
 
+/// Mesh vertices into a piece's own coordinates.
+///
+/// A piece's box comes from the CSG and lives in model space (Z up); a mesh sits in the scene
+/// (Y up). Skipping MODEL_TO_WORLD here puts every vertex outside every box — silently, since
+/// the result is simply "nothing matched".
+function meshToPiece(mesh, box) {
+  const worldToModel = new THREE.Matrix4().copy(MODEL_TO_WORLD).invert();
+  return new THREE.Matrix4()
+    .multiplyMatrices(box.inverse, new THREE.Matrix4().multiplyMatrices(worldToModel, mesh.matrixWorld));
+}
+
+/// Clips world-space triangles to a piece's box, as a flat array of positions.
+///
+/// Needed because CGAL welds coplanar faces: the whole right side of kniznica.scad — the
+/// chest's side panel, the board between, and the cabinet's panel above — comes out as one
+/// rectangle of two triangles, 2020 mm tall. Highlighting it whole is faithful to the mesh but
+/// not to the question being asked, which is about the piece under the cursor.
+///
+/// Sutherland–Hodgman against the box's six planes, in the piece's own coordinates.
+export function clipToBox(mesh, triangles, component) {
+  const box = prepareBox(component);
+  const toPiece = meshToPiece(mesh, box);
+  const toWorld = new THREE.Matrix4().multiplyMatrices(MODEL_TO_WORLD, box.matrix);
+  const position = mesh.geometry.attributes.position;
+  const slack = 0.5;
+  const out = [];
+
+  const planes = [
+    { axis: 'x', sign: 1, at: box.min.x - slack }, { axis: 'x', sign: -1, at: box.max.x + slack },
+    { axis: 'y', sign: 1, at: box.min.y - slack }, { axis: 'y', sign: -1, at: box.max.y + slack },
+    { axis: 'z', sign: 1, at: box.min.z - slack }, { axis: 'z', sign: -1, at: box.max.z + slack },
+  ];
+
+  for (const t of triangles) {
+    let polygon = [0, 1, 2].map((k) =>
+      new THREE.Vector3().fromBufferAttribute(position, t * 3 + k).applyMatrix4(toPiece));
+
+    for (const plane of planes) {
+      if (!polygon.length) break;
+      const inside = (p) => plane.sign * (p[plane.axis] - plane.at) >= 0;
+      const clipped = [];
+      for (let i = 0; i < polygon.length; i++) {
+        const a = polygon[i];
+        const b = polygon[(i + 1) % polygon.length];
+        const aIn = inside(a);
+        const bIn = inside(b);
+        if (aIn) clipped.push(a);
+        if (aIn !== bIn) {
+          const d = b[plane.axis] - a[plane.axis];
+          if (Math.abs(d) > 1e-12) {
+            clipped.push(a.clone().lerp(b, (plane.at - a[plane.axis]) / d));
+          }
+        }
+      }
+      polygon = clipped;
+    }
+
+    for (let i = 1; i + 1 < polygon.length; i++) {
+      for (const p of [polygon[0], polygon[i], polygon[i + 1]]) {
+        const w = p.clone().applyMatrix4(toWorld);
+        out.push(w.x, w.y, w.z);
+      }
+    }
+  }
+  return out;
+}
+
+/// Triangles of `mesh` that lie wholly inside a piece's box.
+///
+/// The union welds panels into one solid, so a piece owns no triangles; this recovers them
+/// well enough to light its surfaces and to take it out of the view.
+///
+/// Every vertex must be inside, not just the centroid: the welded mesh has triangles spanning
+/// several panels, and a centroid test handed those to whichever box held their middle — hiding
+/// one panel then tore a wedge out of its neighbours. Erring this way leaves a sliver of a
+/// piece behind at worst, instead of damaging something else.
+///
+/// Cached per mesh and piece, since a hover would otherwise rescan on every frame.
+const triangleCache = new WeakMap();
+
+export function trianglesInBox(mesh, component) {
+  let byPiece = triangleCache.get(mesh);
+  if (!byPiece) { byPiece = new Map(); triangleCache.set(mesh, byPiece); }
+  const cached = byPiece.get(component);
+  if (cached) return cached;
+
+  const box = prepareBox(component);
+  const toPiece = meshToPiece(mesh, box);
+  const position = mesh.geometry.attributes.position;
+  const v = new THREE.Vector3();
+  const slack = 0.5;
+  const found = [];
+
+  for (let i = 0; i < position.count / 3; i++) {
+    let inside = true;
+    for (let k = 0; k < 3 && inside; k++) {
+      v.fromBufferAttribute(position, i * 3 + k).applyMatrix4(toPiece);
+      inside = v.x >= box.min.x - slack && v.x <= box.max.x + slack
+            && v.y >= box.min.y - slack && v.y <= box.max.y + slack
+            && v.z >= box.min.z - slack && v.z <= box.max.z + slack;
+    }
+    if (inside) found.push(i);
+  }
+
+  byPiece.set(component, found);
+  return found;
+}
+
 /// The outline of an extruded piece: the profile at top and bottom, joined at its corners.
 ///
 /// Verticals only where the profile actually turns — a tessellated arc is a smooth surface with

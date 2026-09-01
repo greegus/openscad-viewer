@@ -26,32 +26,6 @@
     font: 600 12px -apple-system, system-ui, sans-serif;
     pointer-events: none; white-space: nowrap;
   }
-  /* Hidden pieces, top right — only present when there are any. */
-  #hidden-list {
-    position: absolute; right: 10px; top: 10px;
-    display: flex; flex-direction: column; align-items: stretch; gap: 2px;
-    padding: 6px; border-radius: 8px; min-width: 150px; max-width: 260px;
-    background: rgba(18, 20, 24, 0.55);
-    backdrop-filter: blur(14px) saturate(1.4);
-    -webkit-backdrop-filter: blur(14px) saturate(1.4);
-    box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.12);
-    font: 12px -apple-system, system-ui, sans-serif;
-  }
-  /* `display: flex` above beats the plain `hidden` attribute, so say it explicitly —
-     otherwise an empty panel keeps floating there with nothing in it. */
-  #hidden-list[hidden] { display: none; }
-  .hidden-title {
-    color: rgba(255, 255, 255, 0.55);
-    padding: 2px 6px 4px; font-weight: 600;
-  }
-  .hidden-row {
-    appearance: none; border: 0; text-align: left; cursor: pointer;
-    padding: 4px 6px; border-radius: 5px;
-    background: transparent; color: rgba(255, 255, 255, 0.92);
-    font: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .hidden-row:hover { background: rgba(255, 255, 255, 0.14); }
-  .hidden-all { margin-top: 4px; color: rgba(255, 255, 255, 0.6); }
   /* Command palette */
   #palette {
     position: absolute; inset: 0; z-index: 10;
@@ -85,6 +59,45 @@
   .palette-key { color: rgba(255, 255, 255, 0.4); font-size: 11px; }
   .palette-empty { padding: 12px; color: rgba(255, 255, 255, 0.45);
                    font: 13px -apple-system, system-ui, sans-serif; }
+  /* Parts list, top right */
+  #parts-tree {
+    position: absolute; left: 10px; top: 10px;
+    display: flex; flex-direction: column; width: 232px;
+    max-height: calc(100% - 76px); overflow: hidden;
+    border-radius: 9px; background: rgba(18, 20, 24, 0.62);
+    backdrop-filter: blur(16px) saturate(1.4);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.12);
+    font: 12px -apple-system, system-ui, sans-serif;
+    color: rgba(255, 255, 255, 0.9);
+  }
+  .tree-header {
+    display: flex; align-items: center; gap: 6px;
+    appearance: none; border: 0; cursor: pointer; width: 100%; text-align: left;
+    padding: 8px 10px; background: transparent; color: rgba(255, 255, 255, 0.62);
+    font: 600 11px -apple-system, system-ui, sans-serif;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .tree-body { overflow-y: auto; padding: 0 4px 6px; }
+  .tree-row {
+    display: flex; align-items: center; gap: 4px;
+    padding: 3px 4px; border-radius: 5px;
+  }
+  .tree-row:hover { background: rgba(255, 255, 255, 0.09); }
+  .tree-row.is-off .tree-name { opacity: 0.4; text-decoration: line-through; }
+  .tree-row.is-group .tree-name { color: rgba(255, 255, 255, 0.72); font-weight: 600; }
+  .tree-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tree-caret {
+    appearance: none; border: 0; background: transparent; cursor: pointer;
+    width: 14px; padding: 0; color: rgba(255, 255, 255, 0.45); font-size: 9px;
+  }
+  /* Always present, so a row does not shift when the pointer arrives. */
+  .tree-eye {
+    appearance: none; border: 0; background: transparent; cursor: pointer;
+    padding: 0 2px; font-size: 12px; color: rgba(255, 255, 255, 0.75); opacity: 0;
+  }
+  .tree-row:hover .tree-eye, .tree-eye.is-off { opacity: 1; }
+  .tree-eye.is-off { color: rgba(255, 255, 255, 0.4); }
   #readout {
     position: absolute; left: 10px; bottom: 10px;
     padding: 6px 11px; border-radius: 8px;
@@ -102,7 +115,7 @@
 <canvas id="canvas"></canvas>
 <div id="status">Rendering mesh…</div>
 <div id="readout"></div>
-<div id="hidden-list" hidden></div>
+<div id="parts-tree"></div>
 
 <script type="importmap">
 { "imports": { "three": "./vendor/three.module.min.js" } }
@@ -114,15 +127,22 @@ import { STLLoader } from './vendor/STLLoader.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { createMeasure } from './measure.js';
 import { createInspect } from './inspect.js';
-import { pieceOutline, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
+import { pieceOutline, trianglesInBox, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
 import { updateStrokeResolution } from './strokes.js';
 import { createGrid } from './grid.js';
 import { createPalette } from './palette.js';
+import { createTree } from './tree.js';
 
 const canvas = document.getElementById('canvas');
 const status = document.getElementById('status');
 const readoutEl = document.getElementById('readout');
-const hiddenList = document.getElementById('hidden-list');
+const treeEl = document.getElementById('parts-tree');
+const tree = createTree({
+  container: treeEl,
+  onToggle: setHidden,
+  isHidden: (id) => hiddenIds.has(id),
+  label: (piece) => `#${piece.id} · ` + piece.size.map((v) => +v.toFixed(1)).join(' × ') + ' mm',
+});
 const dark = matchMedia('(prefers-color-scheme: dark)').matches;
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -489,7 +509,6 @@ resize();
 /// brought back, since both tools cache edge lists built from it.
 function retarget() {
   measure?.setTargets(parts.map((p) => ({ mesh: p.mesh, edgesGeometry: p.edges.geometry })));
-  const hiddenIds = new Set(hidden.flatMap((e) => e.componentIds ?? []));
   inspect?.setTargets({ parts, components: components.filter((c) => !hiddenIds.has(c.id)) });
 }
 
@@ -557,21 +576,22 @@ function setPieces(on) {
 
 // --- hiding ---
 
-/// Pieces the user has taken out of the view. Not a deletion: the geometry is rebuilt from
-/// the pristine copy each time, so restoring is exact and the model on disk is untouched.
-const hidden = [];
+/// Pieces switched off in the parts list. Not a deletion: the mesh is rebuilt from a pristine
+/// copy each time, so bringing one back is exact and the .scad file is never touched.
+const hiddenIds = new Set();
 
-/// Rebuilds every material mesh without its hidden triangles.
+/// Rebuilds every material mesh without the triangles of its hidden pieces.
 ///
 /// Rebuilding rather than flagging in a shader, because the edge overlay is its own geometry
 /// derived from the mesh — a shader that discarded triangles would leave the edges of a hidden
 /// piece hanging in the air.
 function applyHidden() {
+  const dropped = components.filter((c) => hiddenIds.has(c.id));
+
   for (const part of parts) {
     const drop = new Set();
-    for (const entry of hidden) {
-      if (entry.part !== part) continue;
-      for (const t of entry.triangles) drop.add(t);
+    for (const component of dropped) {
+      for (const t of trianglesInBox(part.mesh, component)) drop.add(t);
     }
 
     const source = part.source.attributes.position;
@@ -597,61 +617,35 @@ function applyHidden() {
     part.edges.geometry = new THREE.EdgesGeometry(geometry, 20);
   }
 
-  // Outlines of pieces inside something hidden must go with it.
-  const hiddenIds = new Set(hidden.flatMap((e) => e.componentIds ?? []));
   buildPieces(components.filter((c) => !hiddenIds.has(c.id)));
-
   retarget();
-  renderHiddenList();
+  tree?.refresh();
+}
+
+/// Switches pieces off or on. Ids rather than triangles, so the same call serves one piece and
+/// a whole group, and so a reload can put the list back.
+function setHidden(ids, visible) {
+  for (const id of ids) {
+    if (visible) hiddenIds.delete(id); else hiddenIds.add(id);
+  }
+  applyHidden();
 }
 
 /// Hides whatever is selected. Only a part or a whole body: hiding one face of a solid would
-/// leave a hole rather than remove anything.
+/// leave a hole rather than remove a piece.
 function hideSelection() {
-  const selection = inspect?.selection();
-  if (!selection?.triangles?.length) return false;
-
-  hidden.push({
-    label: selection.label,
-    part: parts.find((p) => p.mesh === selection.mesh),
-    triangles: selection.triangles,
-    componentIds: selection.componentIds,
-  });
+  const ids = inspect?.selection()?.componentIds ?? [];
+  if (!ids.length) return false;
   inspect.clear();
-  applyHidden();
+  setHidden(ids, false);
   return true;
 }
 
-function restore(index) {
-  if (index === undefined) hidden.length = 0; else hidden.splice(index, 1);
+function restore() {
+  hiddenIds.clear();
   applyHidden();
 }
 
-function renderHiddenList() {
-  hiddenList.hidden = hidden.length === 0;
-  hiddenList.textContent = '';
-  if (!hidden.length) return;
-
-  const title = document.createElement('div');
-  title.className = 'hidden-title';
-  title.textContent = `Hidden (${hidden.length})`;
-  hiddenList.appendChild(title);
-
-  hidden.forEach((entry, index) => {
-    const row = document.createElement('button');
-    row.className = 'hidden-row';
-    row.textContent = entry.label;
-    row.title = 'Click to bring back';
-    row.addEventListener('click', () => restore(index));
-    hiddenList.appendChild(row);
-  });
-
-  const all = document.createElement('button');
-  all.className = 'hidden-row hidden-all';
-  all.textContent = 'Restore all';
-  all.addEventListener('click', () => restore());
-  hiddenList.appendChild(all);
-}
 
 window.addEventListener('keydown', (event) => {
   if (event.key !== 'Delete' && event.key !== 'Backspace') return;
@@ -668,7 +662,7 @@ async function load() {
   status.textContent = 'Rendering mesh…';
   try {
     clearParts();
-    hidden.length = 0;
+    hiddenIds.clear();
     let source = 'materials';
     let manifest = null;
     try {
@@ -690,6 +684,7 @@ async function load() {
 
     components = manifest?.components ?? [];
     buildPieces(components);
+    tree.setComponents(components);
 
     grid ??= createGrid({ scene });
     setMode(mode);
@@ -771,8 +766,8 @@ function paletteActions() {
 
   list.push({ group: 'Selection', title: 'Hide selected piece', shortcut: '⌫',
               run: hideSelection, enabled: () => !!inspect?.selection()?.triangles?.length });
-  list.push({ group: 'Selection', title: `Restore all hidden (${hidden.length})`,
-              run: () => restore(), enabled: () => hidden.length > 0 });
+  list.push({ group: 'Selection', title: `Show all hidden (${hiddenIds.size})`,
+              run: () => restore(), enabled: () => hiddenIds.size > 0 });
   list.push({ group: 'Selection', title: 'Clear selection',
               run: () => inspect?.clear(), enabled: () => !!inspect?.selection() });
 
@@ -794,7 +789,7 @@ window.addEventListener('keydown', (event) => {
 
 /// Back to how the file opened: geometry re-read, hidden pieces back, camera reframed.
 window.resetView = () => {
-  hidden.length = 0;
+  hiddenIds.clear();
   meshLoaded = false;
   framed = false;              // Cmd-R is the one reload that *should* reframe
   return load();
@@ -852,10 +847,12 @@ window.debug = {
     controls.update();
   },
 
-  hidden: () => hidden.map((e) => e.label),
+  hidden: () => [...hiddenIds],
   hide: () => hideSelection(),
   selection: () => inspect?.selection() ?? null,
-  restore: (i) => restore(i),
+  restore: () => restore(),
+  setHidden: (ids, visible) => setHidden(ids, visible),
+  tree: () => document.querySelectorAll('#parts-tree .tree-row').length,
 
   // Inspect: what is under the cursor, where the modifier path resolves, and a point
   // guaranteed to lie on an arc.

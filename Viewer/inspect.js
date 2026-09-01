@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { toScreen, cursorPx, buildEdgeList, buildFeatures, featureUnderCursor, axisName, pieceOutline, MODEL_TO_WORLD } from './picking.js';
+import { toScreen, cursorPx, buildEdgeList, buildFeatures, featureUnderCursor, axisName, pieceOutline, trianglesInBox, clipToBox, MODEL_TO_WORLD } from './picking.js';
 import { createStroke } from './strokes.js';
 
 /// Inspect: hover highlights what is under the cursor, a click selects it.
@@ -127,7 +127,7 @@ export function createInspect({ scene, view, renderer, readout }) {
       const origin = [c.matrix[3], c.matrix[7], c.matrix[11]];
       const corner = c.centered ? origin.map((v, i) => v - c.size[i] / 2) : origin;
       return {
-        id: c.id, corner,
+        id: c.id, corner, source: c,
         size: c.size, world, inverse: world.clone().invert(), outline,
         box: new THREE.Box3(min, min.clone().add(new THREE.Vector3(sx, sy, sz))),
       };
@@ -144,42 +144,6 @@ export function createInspect({ scene, view, renderer, readout }) {
     raycaster.setFromCamera(
       new THREE.Vector2((px.x / r.width) * 2 - 1, -(px.y / r.height) * 2 + 1), view.camera);
     return raycaster.intersectObjects(state.meshes, false)[0] ?? null;
-  }
-
-  /// Triangles of `mesh` that lie wholly inside the piece's box.
-  ///
-  /// The union welded the panels into one solid, so a piece owns no triangles; this recovers
-  /// them well enough to light up its surfaces and to take it out of the view.
-  ///
-  /// Every vertex must be inside, not just the centroid. The welded mesh has triangles that
-  /// span several panels, and a centroid test claimed those for whichever box happened to
-  /// contain their middle — hiding one panel then tore a wedge out of its neighbours. Erring
-  /// this way leaves a sliver of a piece behind at worst, instead of damaging something else.
-  ///
-  /// Computed once per piece and kept, since a hover would otherwise redo it every frame.
-  function trianglesOf(piece, mesh) {
-    const cached = piece.triangles?.get(mesh);
-    if (cached) return cached;
-
-    const pos = mesh.geometry.attributes.position;
-    const v = new THREE.Vector3();
-    const t = 0.5;
-    const found = [];
-
-    for (let i = 0; i < pos.count / 3; i++) {
-      let inside = true;
-      for (let k = 0; k < 3 && inside; k++) {
-        v.fromBufferAttribute(pos, i * 3 + k).applyMatrix4(mesh.matrixWorld).applyMatrix4(piece.inverse);
-        inside = v.x >= piece.box.min.x - t && v.x <= piece.box.max.x + t
-              && v.y >= piece.box.min.y - t && v.y <= piece.box.max.y + t
-              && v.z >= piece.box.min.z - t && v.z <= piece.box.max.z + t;
-      }
-      if (inside) found.push(i);
-    }
-
-    piece.triangles ??= new Map();
-    piece.triangles.set(mesh, found);
-    return found;
   }
 
   /// The smallest piece whose box contains the point — panels sit inside carcasses, so the
@@ -199,14 +163,21 @@ export function createInspect({ scene, view, renderer, readout }) {
     return best?.piece ?? null;
   }
 
-  function faceGeometry(mesh, triangles) {
-    const pos = mesh.geometry.attributes.position;
-    const points = [];
-    const v = new THREE.Vector3();
-    for (const t of triangles) {
-      for (let k = 0; k < 3; k++) {
-        v.fromBufferAttribute(pos, t * 3 + k).applyMatrix4(mesh.matrixWorld);
-        points.push(v.x, v.y, v.z);
+  /// `piece` limits the face to one piece — see `clipToBox`. Without it, a face welded across
+  /// several pieces lights all of them up.
+  function faceGeometry(mesh, triangles, piece) {
+    let points;
+    if (piece) {
+      points = clipToBox(mesh, triangles, piece.source ?? piece);
+    } else {
+      const pos = mesh.geometry.attributes.position;
+      points = [];
+      const v = new THREE.Vector3();
+      for (const t of triangles) {
+        for (let k = 0; k < 3; k++) {
+          v.fromBufferAttribute(pos, t * 3 + k).applyMatrix4(mesh.matrixWorld);
+          points.push(v.x, v.y, v.z);
+        }
       }
     }
     const geometry = new THREE.BufferGeometry();
@@ -290,7 +261,7 @@ export function createInspect({ scene, view, renderer, readout }) {
       lines.setPoints(points);
       if (target.triangles?.length) {
         face.geometry.dispose();
-        face.geometry = faceGeometry(target.mesh, target.triangles);
+        face.geometry = faceGeometry(target.mesh, target.triangles, target.piece);
         face.visible = true;
       }
       const centre = new THREE.Vector3(
@@ -300,7 +271,9 @@ export function createInspect({ scene, view, renderer, readout }) {
       return centre.applyMatrix4(target.piece.world);
     }
     face.geometry.dispose();
-    face.geometry = faceGeometry(target.mesh, target.triangles);
+    // A face is limited to the piece it belongs to; a body is the whole solid by definition.
+    face.geometry = faceGeometry(target.mesh, target.triangles,
+                                 target.type === 'face' ? target.piece : null);
     face.visible = true;
     return target.point.clone();   // 'face' and 'body' are both triangle sets
   }
@@ -312,7 +285,7 @@ export function createInspect({ scene, view, renderer, readout }) {
       const piece = pieceAt(h.point);
       // Its surfaces as well as its outline: holding the modifier should show what would go,
       // not just where its edges run.
-      if (piece) return { type: 'part', piece, mesh: h.object, triangles: trianglesOf(piece, h.object) };
+      if (piece) return { type: 'part', piece, mesh: h.object, triangles: trianglesInBox(h.object, piece.source ?? piece) };
       // No CSG box here. Fall back to the welded solid — but only if it is actually a piece:
       // after the union most of a design is one connected body, and offering "the whole model"
       // as a selection is never what the modifier is for.
@@ -335,7 +308,10 @@ export function createInspect({ scene, view, renderer, readout }) {
     const info = state.groups.get(h.object);
     if (!info) return null;
     const triangles = info.groups.get(info.find(h.faceIndex)) ?? [h.faceIndex];
-    return { type: 'face', mesh: h.object, triangles, point: h.point, normal: info.planes[h.faceIndex].normal };
+    // The piece the cursor is over, so the highlight can stop at its edge: CGAL welds coplanar
+    // faces, and the right side of a unit can be one rectangle spanning several boards.
+    return { type: 'face', mesh: h.object, triangles, point: h.point,
+             piece: pieceAt(h.point), normal: info.planes[h.faceIndex].normal };
   }
 
   function describe(target) {
@@ -543,9 +519,21 @@ export function createInspect({ scene, view, renderer, readout }) {
 
   const debug = () => ({
     lastEvent,
-    hovered: hovered ? { type: hovered.type, segments: hovered.feature?.segments.length ?? null } : null,
+    hovered: hovered ? {
+      type: hovered.type,
+      segments: hovered.feature?.segments.length ?? null,
+      triangles: hovered.triangles?.length ?? null,
+    } : null,
     selected: selected ? { type: selected.type, segments: selected.feature?.segments.length ?? null } : null,
     drawnHover: hoverLines.segmentCount,
+    // Extent of the face actually drawn, not of the triangles it came from: the two differ
+    // once the highlight is clipped to a piece, which is the whole point of the clipping.
+    drawnFace: (() => {
+      if (!hoverFace.visible) return null;
+      hoverFace.geometry.computeBoundingBox();
+      const b = hoverFace.geometry.boundingBox;
+      return b ? [b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z].map((n) => Math.round(n)) : null;
+    })(),
     drawnSelect: selectLines.segmentCount,
   });
 

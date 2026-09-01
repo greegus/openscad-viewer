@@ -134,10 +134,17 @@ extension CSGSplitter {
         /// outline against them, otherwise an edge is drawn straight across a milled groove.
         var cutters: [Box]
 
-        init(box: Box, cutters: [Box], profile: [[Double]]? = nil) {
+        /// Where this piece sits in the CSG tree, as the child index taken at each level.
+        /// OpenSCAD keeps no names — a module leaves no trace in the dump — but the *shape* of
+        /// the tree survives, and that is enough to group pieces into the assemblies they were
+        /// written as.
+        var path: [Int] = []
+
+        init(box: Box, cutters: [Box], profile: [[Double]]? = nil, path: [Int] = []) {
             self.box = box
             self.cutters = cutters
             self.profile = profile
+            self.path = path
         }
     }
 
@@ -185,21 +192,22 @@ extension CSGSplitter {
             for child in n.children { collectBoxes(child, current, into: &out) }
         }
 
-        func walk(_ n: Node, _ transform: [Double], cutters: [Box], removed: Bool) {
+        func walk(_ n: Node, _ transform: [Double], cutters: [Box], removed: Bool, path: [Int]) {
             var current = transform
             if n.name == "multmatrix", let m = matrix(from: n.args) {
                 current = multiply(transform, m)
             }
             if n.name == "cube", !removed, let c = cube(from: n.args) {
                 result.append(Component(box: Box(matrix: current, size: c.size, centered: c.centered),
-                                        cutters: cutters))
+                                        cutters: cutters, path: path))
             }
 
             // A board with a rounded corner is an extruded profile, not a cube. Without this it
             // had no piece at all: the Parts overlay skipped it, and holding the modifier fell
             // through to "the whole connected solid" — which, after the union, is the model.
             if n.name == "linear_extrude", !removed, let made = extrude(n, current) {
-                result.append(Component(box: made.box, cutters: cutters, profile: made.profile))
+                result.append(Component(box: made.box, cutters: cutters, profile: made.profile,
+                                        path: path))
                 return                       // its 2D children are a profile, not geometry
             }
 
@@ -210,20 +218,21 @@ extension CSGSplitter {
                 for child in n.children.dropFirst() {
                     collectBoxes(child, current, into: &inherited)
                 }
-                walk(first, current, cutters: inherited, removed: removed)
-                for child in n.children.dropFirst() {
-                    walk(child, current, cutters: cutters, removed: true)
+                walk(first, current, cutters: inherited, removed: removed, path: path + [0])
+                for (index, child) in n.children.enumerated().dropFirst() {
+                    walk(child, current, cutters: cutters, removed: true, path: path + [index])
                 }
                 return
             }
 
-            for child in n.children {
+            for (index, child) in n.children.enumerated() {
                 // Intersection operands each overstate the result, which is only their overlap.
-                walk(child, current, cutters: cutters, removed: removed || n.name == "intersection")
+                walk(child, current, cutters: cutters, removed: removed || n.name == "intersection",
+                     path: path + [index])
             }
         }
 
-        walk(node, identity, cutters: [], removed: false)
+        walk(node, identity, cutters: [], removed: false, path: [])
         return merged(result)
     }
 
@@ -257,10 +266,20 @@ extension CSGSplitter {
             return (low, (0..<3).map { low[$0] + c.box.size[$0] })
         }
 
-        var boxes: [(min: [Double], max: [Double])] = []
+        var boxes: [(min: [Double], max: [Double], path: [Int])] = []
         var passthrough: [Component] = []
         for c in components {
-            if let e = extent(c) { boxes.append(e) } else { passthrough.append(c) }
+            if let e = extent(c) { boxes.append((e.min, e.max, c.path)) } else { passthrough.append(c) }
+        }
+
+        /// Only pieces written side by side in the same place may be folded together.
+        ///
+        /// Merging exists for one board drawn as several cubes, and those are siblings. Without
+        /// this test it also swallowed genuinely separate boards that happen to line up — the
+        /// cabinet's side panel and the chest's below it are flush and touching, so they became
+        /// a single piece and hovering one highlighted both.
+        func siblings(_ a: [Int], _ b: [Int]) -> Bool {
+            a.count == b.count && a.count > 0 && Array(a.dropLast()) == Array(b.dropLast())
         }
 
         var changed = true
@@ -272,14 +291,17 @@ extension CSGSplitter {
                     let matching = (0..<3).filter {
                         abs(a.min[$0] - b.min[$0]) < tolerance && abs(a.max[$0] - b.max[$0]) < tolerance
                     }
-                    guard matching.count == 2,
+                    guard siblings(a.path, b.path),
+                          matching.count == 2,
                           let axis = (0..<3).first(where: { !matching.contains($0) }),
                           a.max[axis] >= b.min[axis] - tolerance,
                           b.max[axis] >= a.min[axis] - tolerance
                     else { continue }
 
                     boxes[i] = (min: (0..<3).map { min(a.min[$0], b.min[$0]) },
-                                max: (0..<3).map { max(a.max[$0], b.max[$0]) })
+                                max: (0..<3).map { max(a.max[$0], b.max[$0]) },
+                                // Keeps the first path, so a third sibling still compares equal.
+                                path: a.path)
                     boxes.remove(at: j)
                     changed = true
                     break outer
@@ -293,7 +315,8 @@ extension CSGSplitter {
                                     0, 1, 0, box.min[1],
                                     0, 0, 1, box.min[2],
                                     0, 0, 0, 1]
-            return Component(box: Box(matrix: matrix, size: size, centered: false), cutters: [])
+            return Component(box: Box(matrix: matrix, size: size, centered: false), cutters: [],
+                             path: box.path)
         }
         return rebuilt + passthrough
     }

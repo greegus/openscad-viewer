@@ -208,8 +208,7 @@ never learns which host it is in — that difference used to live inside it.
     at any zoom, antialias through `fwidth`, and fade out radially from the origin instead of
     ending in a hard edge. Two pitches (100 mm and 1000 mm) plus the X and Y axes coloured in
     the same pass; the vertical axis is a separate line, since it cannot live on the ground.
-  - **Delete hides the selection** and lists it top right; clicking an entry brings it back, and
-    "Restore all" clears the list. Only a part or a whole body — hiding one face of a solid would
+  - **Delete hides the selection**, and the parts list on the left shows it switched off. Only a part or a whole body — hiding one face of a solid would
     make a hole rather than remove a piece. Nothing is deleted: the mesh is rebuilt from a
     pristine copy each time, so restoring is exact and the .scad file is never touched.
     Rebuilt rather than discarded in a shader, because the edge overlay is its own geometry
@@ -378,6 +377,18 @@ editor. `FileWatcher` watches the *containing directory*, not the file: editors 
 a temp file and renaming it over the original, which replaces the inode and leaves a file-level
 watch pointing at something nobody will write to again. Events are coalesced and checked against
 the file's mtime, so one save costs one render.
+
+**Parts list.** Every piece in the model, on the left, grouped the way the design was written,
+with a visibility toggle on each piece *and* each group; groups start expanded and the panel
+folds away by its header. OpenSCAD exports no names — a module leaves no trace in the CSG dump —
+but the *shape* of the tree survives, so each piece carries the path it sits on and the list
+groups by that. Chains with nothing to choose between are folded away: the dump has 233 `group()`
+nodes, nearly all anonymous wrappers, and without folding you would click through a dozen levels
+before reaching a piece. Measured on kniznica.scad: 88 rows, 25 groups, 63 pieces.
+
+Note the piece paths also fixed something else — merging only folds *siblings* now. Collinear
+boxes were merged on geometry alone, which would swallow two genuinely separate boards that
+happen to line up, and geometry cannot tell those apart.
 
 **Command palette** (Cmd-K) searches every action the viewer has: modes, projection, the six
 standard views, the overlays, both tools, the selection commands, and whatever the host can do.

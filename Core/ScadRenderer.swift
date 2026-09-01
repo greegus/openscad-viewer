@@ -56,6 +56,11 @@ enum ScadRenderer {
         return dir
     }
 
+    /// Bump whenever the manifest gains or changes a field, or a cached one written by an older
+    /// build will be served as if current — pieces arrived without their tree paths that way,
+    /// and the parts list showed one flat group instead of the design's structure.
+    private static let format = "v3"
+
     /// Key = path + mtime + size, the same for every include/use dependency, plus render options.
     /// Thanks to mtime the preview re-renders after editing the file or any library it includes.
     static func cacheKey(for url: URL, options: Options) -> String {
@@ -63,7 +68,7 @@ enum ScadRenderer {
         for dep in dependencies(of: url) {
             raw += stamp(for: dep)
         }
-        raw += "|\(options.size)|\(options.camera)|\(options.colorscheme)|v2"
+        raw += "|\(options.size)|\(options.camera)|\(options.colorscheme)|\(format)"
         return SHA256.hash(data: Data(raw.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
@@ -224,7 +229,7 @@ enum ScadRenderer {
     private static func digest(of data: Data, options: Options) -> String {
         var hasher = SHA256()
         hasher.update(data: data)
-        hasher.update(data: Data("\(options.size)|\(options.camera)|\(options.colorscheme)|v1".utf8))
+        hasher.update(data: Data("\(options.size)|\(options.camera)|\(options.colorscheme)|\(format)".utf8))
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 }
@@ -342,6 +347,7 @@ extension ScadRenderer {
             var entry = encode(component.box)
             entry["id"] = index + 1
             if let profile = component.profile { entry["profile"] = profile }
+            entry["path"] = component.path
             if !component.cutters.isEmpty { entry["cutters"] = component.cutters.map(encode) }
             return entry
         }
