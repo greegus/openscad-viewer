@@ -212,7 +212,8 @@ const tree = createTree({
   // Hovering a row shows the piece in the scene. Only the first of a group: highlighting a
   // dozen at once needs machinery the inspect tool does not have, and the point is to find
   // where a row *is*, which one piece answers.
-  onHover: (ids) => inspect?.highlightPiece(ids ? ids[0] : null),
+  // The whole group, not just its first piece: pointing at a group asks what it contains.
+  onHover: (ids, label) => inspect?.highlightPieces(ids ?? [], label),
   // Selecting from the list needs the tool running, or there is nothing to select *into*.
   onSelect: (id) => { setTool('inspect'); inspect?.selectPiece(id); },
 });
@@ -273,7 +274,9 @@ function makeControls() {
   // The new pivot is picked along the view axis — the ray through the centre of the viewport —
   // so `camera.position - target` keeps its direction and a standard view stays active.
   renderer.domElement.addEventListener('pointerdown', recentrePivot, true);
-  renderer.domElement.addEventListener('wheel', handlePinch, { capture: true, passive: false });
+  // Both gestures come through here, so OrbitControls must not also dolly on the same event.
+  controls.enableZoom = false;
+  renderer.domElement.addEventListener('wheel', handleWheel, { capture: true, passive: false });
 
   controls.update();
 }
@@ -293,15 +296,25 @@ function refit() {
   camera.updateProjectionMatrix();
 }
 
-/// Pinch on a trackpad reaches the page as a wheel event with `ctrlKey` set, but with much
-/// smaller deltas than a two-finger scroll — through OrbitControls' single zoomSpeed it ends up
-/// feeling far weaker. Handled separately so it gets its own scaling and lands in the same place
-/// a scroll would.
+/// Zoom, for both gestures, under one law.
+///
+/// A trackpad pinch arrives as a wheel event with `ctrlKey` set; a two-finger scroll as one
+/// without. They were handled differently — pinch here, scroll through OrbitControls — and it
+/// showed: OrbitControls takes a *fixed step per event* regardless of how far the fingers moved,
+/// so next to a pinch that scales with the gesture, scrolling felt sluggish. Both now scale with
+/// deltaY, and only the multiplier differs, because a pinch reports much smaller numbers than a
+/// scroll for the same intent.
 const PINCH_SPEED = 0.02;      // per unit of deltaY
+const SCROLL_SPEED = 0.006;
+
+/// A mouse wheel sends 100+ per notch where a trackpad sends single digits; without a cap one
+/// notch would jump most of the way to the model.
+const MAX_DELTA = 50;
+
 const pinchState = { last: 0, delta: 0 };
 
-function handlePinch(event) {
-  if (!event.ctrlKey || !controls) return;      // a plain scroll: leave it to OrbitControls
+function handleWheel(event) {
+  if (!controls) return;
   event.preventDefault();
   event.stopPropagation();
 
@@ -311,7 +324,9 @@ function handlePinch(event) {
   pinchState.last = now;
   pinchState.delta = event.deltaY;
 
-  const factor = Math.exp(event.deltaY * PINCH_SPEED);
+  const speed = event.ctrlKey ? PINCH_SPEED : SCROLL_SPEED;
+  const delta = Math.max(-MAX_DELTA, Math.min(MAX_DELTA, event.deltaY));
+  const factor = Math.exp(delta * speed);
   const camera = view.camera;
   if (camera.isOrthographicCamera) {
     // Orthographic has no distance to change — OrbitControls dollies it by zoom, so match that.
@@ -441,7 +456,9 @@ let pieceLines = null;     // one LineSegments with every piece outline merged i
 let measure = null;
 let grid = null;
 let inspect = null;
-let tool = 'none';
+// Inspect from the start: the thing you almost always want when a model opens is to point
+// at something and be told what it is.
+let tool = 'inspect';
 let components = [];
 
 // Edges are black in both modes — x-ray keeps the normal background, so there is no
@@ -716,9 +733,26 @@ function applyHidden() {
 
 /// Switches pieces off or on. Ids rather than triangles, so the same call serves one piece and
 /// a whole group, and so a reload can put the list back.
-function setHidden(ids, visible) {
+///
+/// `only` hides everything else instead — the fastest way to see one piece in a design of
+/// sixty. Doing it again brings everything back, since by then the alternative would be to hide
+/// what is already hidden.
+function setHidden(ids, visible, only = false) {
+  if (only) return isolate(ids);
   for (const id of ids) {
     if (visible) hiddenIds.delete(id); else hiddenIds.add(id);
+  }
+  applyHidden();
+}
+
+function isolate(ids) {
+  const keep = new Set(ids);
+  const alreadyAlone = components.every((c) => keep.has(c.id) !== hiddenIds.has(c.id))
+    && hiddenIds.size === components.length - keep.size;
+
+  hiddenIds.clear();
+  if (!alreadyAlone) {
+    for (const c of components) if (!keep.has(c.id)) hiddenIds.add(c.id);
   }
   applyHidden();
 }
@@ -944,7 +978,8 @@ window.debug = {
 
   /// Pinch scaling, and the last delta seen — the multiplier can only really be judged
   /// against a real trackpad, so it is adjustable from here.
-  pinch: (speed) => (speed === undefined ? { speed: PINCH_SPEED, lastDelta: pinchState.delta } : null),
+  zoom: () => ({ pinch: PINCH_SPEED, scroll: SCROLL_SPEED, cap: MAX_DELTA,
+                 lastDelta: pinchState.delta }),
 
   // Camera moves the controls would make, so preset invalidation can be tested: rotating
   // off a preset must clear it, zooming and panning must not.
@@ -966,6 +1001,41 @@ window.debug = {
   },
 
   components: () => components,
+  /// Renders one frame and hands back the pixels. The only way to settle a question about what
+  /// is actually drawn rather than what is in the buffers.
+  /// Near-white pixels in the rendered frame. The stroke halo is white, so this answers
+  /// "is the highlight actually on screen" without a human looking at it.
+  /// Screen position of a point along a piece's profile, so a test can crop the image where
+  /// the interesting part actually is instead of guessing at offsets.
+  profileScreenPoint: (id, t) => {
+    const c = components.find((x) => x.id === id);
+    if (!c?.profile?.length) return null;
+    const p = c.profile[Math.floor(t * (c.profile.length - 1))];
+    const world = new THREE.Vector3(p[0], p[1], c.size[2])
+      .applyMatrix4(new THREE.Matrix4().set(...c.matrix))
+      .applyMatrix4(MODEL_TO_WORLD);
+    const ndc = world.project(view.camera);
+    return [Math.round((ndc.x * 0.5 + 0.5) * canvas.width),
+            Math.round((-ndc.y * 0.5 + 0.5) * canvas.height)];
+  },
+  countWhite: () => {
+    renderer.render(scene, view.camera);
+    const off = document.createElement('canvas');
+    off.width = canvas.width; off.height = canvas.height;
+    const ctx = off.getContext('2d');
+    ctx.drawImage(canvas, 0, 0);
+    const data = ctx.getImageData(0, 0, off.width, off.height).data;
+    let n = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] > 240 && data[i + 1] > 240 && data[i + 2] > 240) n++;
+    }
+    return n;
+  },
+  snapshot: () => { renderer.render(scene, view.camera); return canvas.toDataURL('image/png'); },
+  pieceOutline: (id) => {
+    const c = components.find((x) => x.id === id);
+    return c ? pieceOutline(c) : [];
+  },
   section: () => section.debug,
   // How many of the three materials on each part actually carry the clipping plane — a plane
   // missed on one of them leaves its edges hanging in the cut.

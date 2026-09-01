@@ -178,9 +178,9 @@ extension CSGSplitter {
     /// lists geometry in evaluation order — the order the markers appear in — so this holds
     /// while each marked call produces exactly one piece. Anything past the last marker keeps
     /// its number rather than borrowing a name it has no claim to.
-    static func components(in node: Node, source: String) -> [Component] {
+    static func components(in node: Node, source: String, values: [String: Int] = [:]) -> [Component] {
         var pieces = unmerged(in: node)
-        for (index, marker) in Annotations.markers(in: source).enumerated() where index < pieces.count {
+        for (index, marker) in Annotations.expand(source, values: values).enumerated() where index < pieces.count {
             pieces[index].name = marker.name
             pieces[index].groups = marker.groups
         }

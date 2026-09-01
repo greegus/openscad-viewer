@@ -276,7 +276,16 @@ export function clipToBox(mesh, triangles, component) {
 /// this piece and the board flush beside it at once; demanding it lie wholly inside leaves a
 /// grey stripe across the highlight wherever that happens. Paired with `clipToBox`, which cuts
 /// those triangles back to the piece, the highlight is exact.
+const touchingCache = new WeakMap();
+
 export function trianglesTouchingBox(mesh, component) {
+  // Cached like `trianglesInBox`: hovering a group asks for every piece in it, and without this
+  // that is a full scan of the mesh per piece per pointer move.
+  let byPiece = touchingCache.get(mesh);
+  if (!byPiece) { byPiece = new Map(); touchingCache.set(mesh, byPiece); }
+  const cached = byPiece.get(component);
+  if (cached) return cached;
+
   const box = prepareBox(component);
   const toPiece = meshToPiece(mesh, box);
   const position = mesh.geometry.attributes.position;
@@ -301,6 +310,8 @@ export function trianglesTouchingBox(mesh, component) {
       found.push(i);
     }
   }
+
+  byPiece.set(component, found);
   return found;
 }
 

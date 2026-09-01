@@ -130,7 +130,7 @@ export function createTree({ container, onToggle, isHidden, label, onHover, onSe
     row.querySelector('.tree-name').textContent = node.label ?? 'Group';
     // Pointing at a group lights up everything under it, which is how you find out what a
     // group actually is — the names are ours, not the design's.
-    hoverable(row, own.map((p) => p.id));
+    hoverable(row, own.map((p) => p.id), node.label ?? `Group ${index}`);
     // The name is on the row, not on the caret, so clicking the name selects rather than folds.
     row.querySelector('.tree-name').addEventListener('click', () => {
       onSelect?.(own[0].id);
@@ -145,11 +145,12 @@ export function createTree({ container, onToggle, isHidden, label, onHover, onSe
     const eye = row.querySelector('.tree-eye');
     eye.innerHTML = hiddenCount === own.length ? EYE_OFF : EYE;
     eye.classList.toggle('is-off', hiddenCount === own.length);
-    eye.title = hiddenCount === own.length ? 'Show all in group' : 'Hide all in group';
+    eye.title = (hiddenCount === own.length ? 'Show all in group' : 'Hide all in group')
+              + ' · ⌘ for this group only';
     // Partly hidden reads as "on", so one click takes the whole group away — the reverse
     // would need two clicks to do anything visible.
-    eye.addEventListener('click', () => {
-      onToggle(own.map((p) => p.id), hiddenCount === own.length);
+    eye.addEventListener('click', (event) => {
+      onToggle(own.map((p) => p.id), hiddenCount === own.length, event.metaKey);
     });
     into.appendChild(row);
 
@@ -160,9 +161,9 @@ export function createTree({ container, onToggle, isHidden, label, onHover, onSe
 
   /// Shows the piece in the scene while the pointer is on its row, and hands the highlight
   /// back on the way out — clearing it outright would blank a piece the cursor is really over.
-  function hoverable(row, ids) {
+  function hoverable(row, ids, label) {
     if (!onHover) return;
-    row.addEventListener('mouseenter', () => onHover(ids));
+    row.addEventListener('mouseenter', () => onHover(ids, label));
     row.addEventListener('mouseleave', () => onHover(null));
   }
 
@@ -180,8 +181,8 @@ export function createTree({ container, onToggle, isHidden, label, onHover, onSe
     const eye = row.querySelector('.tree-eye');
     eye.innerHTML = off ? EYE_OFF : EYE;
     eye.classList.toggle('is-off', off);
-    eye.title = off ? 'Show' : 'Hide';
-    eye.addEventListener('click', () => onToggle([piece.id], off));
+    eye.title = (off ? 'Show' : 'Hide') + ' · ⌘ for this piece only';
+    eye.addEventListener('click', (event) => onToggle([piece.id], off, event.metaKey));
     row.querySelector('.tree-name').addEventListener('click', () => {
       onSelect?.(piece.id);
       selectedId = piece.id;

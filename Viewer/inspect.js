@@ -454,24 +454,69 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     return best?.triangles.length ? best : { type: 'part', piece };
   }
 
-  /// Highlights a piece named from outside — the parts list pointing at a row.
+  /// Highlights pieces named from outside — the parts list pointing at a row, which may be a
+  /// whole group.
   ///
-  /// Goes through the same `show` as a real hover, so the two can never drift apart in how a
-  /// piece is drawn. `null` hands the highlight back to the cursor rather than just clearing
-  /// it, or leaving the list would blank a piece the pointer is genuinely over.
-  function highlightPiece(id) {
-    if (id === null || id === undefined) {
+  /// One piece goes through the same `show` as a real hover, so the two cannot drift apart in
+  /// how a piece is drawn. A group cannot: `show` draws a single target, so the outlines and
+  /// the clipped faces of every piece in the group are combined into one pair of overlays here.
+  /// An empty list hands the highlight back to the cursor rather than merely clearing it, or
+  /// stepping off the list would blank a piece the pointer is genuinely over.
+  function highlightPieces(ids, label) {
+    if (!ids?.length) {
       external = null;
+      // Cleared first, then offered back to the cursor: refreshHover can only redraw once the
+      // pointer has been over the canvas, so without this a highlight lingers after the pointer
+      // leaves the list for anywhere else.
+      hoverLines.visible = false;
+      hoverFace.visible = false;
+      hovered = null;
       refreshHover();
       return;
     }
-    const target = pieceTarget(id);
-    if (!target) return;
-    external = target;
-    hovered = target;
-    show(target, hoverLines, hoverFace);
-    if (!selected) readout(describe(target), heading(target));
+
+    if (ids.length === 1) {
+      const target = pieceTarget(ids[0]);
+      if (!target) return;
+      external = target;
+      hovered = target;
+      show(target, hoverLines, hoverFace);
+      if (!selected) readout(describe(target), heading(target));
+      return;
+    }
+
+    const points = [];
+    const positions = [];
+    let shown = 0;
+
+    for (const id of ids) {
+      const target = pieceTarget(id);
+      if (!target) continue;
+      shown += 1;
+      const outline = target.piece.outline;
+      for (let i = 0; i < outline.length; i += 3) {
+        points.push(new THREE.Vector3(outline[i], outline[i + 1], outline[i + 2]));
+      }
+      if (target.triangles?.length) {
+        for (const v of clipToBox(target.mesh, target.triangles, target.piece.source ?? target.piece)) {
+          positions.push(v);
+        }
+      }
+    }
+
+    hoverLines.setPoints(points);
+    hoverFace.geometry.dispose();
+    hoverFace.geometry = new THREE.BufferGeometry();
+    hoverFace.geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    hoverFace.visible = positions.length > 0;
+
+    external = { type: 'group', count: shown };
+    hovered = null;
+    if (!selected) readout([['Pieces', String(shown)]], { name: label ?? 'Group', id: null });
   }
+
+  const highlightPiece = (id) =>
+    highlightPieces(id === null || id === undefined ? [] : [id]);
 
   canvas.addEventListener('pointermove', (event) => {
     lastPx = cursorPx(event, canvas);
@@ -620,7 +665,9 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
       triangles: hovered.triangles?.length ?? null,
     } : null,
     selected: selected ? { type: selected.type, segments: selected.feature?.segments.length ?? null } : null,
-    drawnHover: hoverLines.segmentCount,
+    // Visibility included on purpose: the buffer keeps its segments after a stroke is hidden,
+    // so a bare count answers "what was last built", not "what is on screen".
+    drawnHover: hoverLines.visible ? hoverLines.segmentCount : 0,
     // Extent of the face actually drawn, not of the triangles it came from: the two differ
     // once the highlight is clipped to a piece, which is the whole point of the clipping.
     selectedFace: (() => {
@@ -635,7 +682,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
       const b = hoverFace.geometry.boundingBox;
       return b ? [b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z].map((n) => Math.round(n)) : null;
     })(),
-    drawnSelect: selectLines.segmentCount,
+    drawnSelect: selectLines.visible ? selectLines.segmentCount : 0,
   });
 
   /// Screen position of a point along the first arc, for driving tests. `t` in [0,1].
@@ -655,5 +702,5 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     centre: [f.centre.x, f.centre.y, f.centre.z].map((v) => Math.round(v)),
   }));
 
-  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, arcPoint, selection, highlightPiece, selectPiece, clear, update };
+  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, arcPoint, selection, highlightPiece, highlightPieces, selectPiece, clear, update };
 }

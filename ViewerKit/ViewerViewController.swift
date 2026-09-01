@@ -87,6 +87,7 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
     private static let tools: [(title: String, id: String)] = [
         ("Inspect", "inspect"),
         ("Measure", "measure"),
+        ("Section", "section"),
     ]
 
     /// 3D display modes. Adding another (wireframe, section) is one line here and in index.html.
@@ -149,6 +150,8 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
         toolPicker = NSSegmentedControl(labels: Self.tools.map(\.title), trackingMode: .selectAny,
                                         target: self, action: #selector(changeTool))
         toolPicker.translatesAutoresizingMaskIntoConstraints = false
+        // The page starts in Inspect, so the button has to start pressed or the two disagree.
+        toolPicker.setSelected(true, forSegment: 0)
 
         spinner.style = .spinning
         spinner.controlSize = .small

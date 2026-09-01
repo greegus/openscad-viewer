@@ -143,7 +143,13 @@ never learns which host it is in — that difference used to live inside it.
 - **The control row** lives in one `NSStackView`, centred while it fits and clamped to the
   left edge when it does not: the left constraint is required, the right one optional, so a
   row too wide for the panel gives way on the right instead of hiding the mode picker.
-- **Pinch zoom** is handled separately from scroll. A trackpad pinch arrives as a wheel event
+- **Zoom** puts both gestures under one law. A trackpad pinch arrives as a wheel event with
+  `ctrlKey` set and a two-finger scroll as one without; they used to be handled differently —
+  pinch here, scroll through OrbitControls — and it showed, because OrbitControls takes a fixed
+  step per event however far the fingers moved, so beside a pinch that scales with the gesture,
+  scrolling felt sluggish. Both now scale with `deltaY` and only the multiplier differs, since a
+  pinch reports much smaller numbers for the same intent. A cap keeps one mouse notch, which
+  sends 100+ where a trackpad sends single digits, from jumping most of the way in. Superseded: A trackpad pinch arrives as a wheel event
   with `ctrlKey` set but much smaller deltas, so through OrbitControls' single `zoomSpeed` it
   felt far weaker than a two-finger scroll; it now gets its own scaling (`PINCH_SPEED`) and
   re-aims the pivot at the start of a gesture, like a drag does. An orthographic camera has no
@@ -409,6 +415,23 @@ CSG dump and comments are stripped from it entirely — so names come from the `
     diel("bocnica", [x0, x0 + hr], y, z);
 // @endgroup
 ```
+
+Two more tags carry the numbers that make the matching work:
+
+```openscad
+// @group Šuflíky   @repeat pocet_suflikov
+    // @name Rebro <i>   @count podstava_rebra
+```
+
+`@count` is how many pieces the next statement makes (a loop, or a condition that may make
+none) and `@repeat` how many times a whole group runs. Without them every name after a loop
+would be off by however many pieces it produced — worse than no names at all. Both hold
+OpenSCAD expressions over the design's own variables, so the design is asked for their values:
+a scratch file `include`s it and echoes each one, folded into the run that already produces the
+CSG dump, since `echo` makes no geometry. A `@count` of 0 claims nothing, which is how a
+switched-off feature stays out of the way instead of stealing the next piece's name. `<i>` and
+`<k>` are filled in by the generating loop; any other `<placeholder>` is a model variable and is
+evaluated the same way.
 
 Groups nest, and one left open at the end of the file closes there. `@group` covers what lies
 between it and its `@endgroup` in reading order, not a module as a whole. Named pieces are

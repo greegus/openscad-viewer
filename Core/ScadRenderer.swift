@@ -289,9 +289,19 @@ extension ScadRenderer {
 
         // The CSG dump is cheap (~0.2 s) — it is only the evaluated tree, no CGAL.
         // Note: OpenSCAD resolves a relative -o against the input's directory, so always pass absolute.
+        let scad = (try? String(contentsOf: input, encoding: .utf8)) ?? ""
+        let expressions = Annotations.expressions(in: scad)
+
+        // The design is asked for the values behind its own @count / @repeat expressions, by
+        // echoing them from a file that includes it. Nothing else can evaluate them: they are
+        // OpenSCAD over the design's variables. Folded into the dump run rather than costing a
+        // second one — echo produces no geometry, so the tree is identical.
+        let source = expressions.isEmpty ? input : withEchoes(of: input, expressions, in: work)
+
         let csgFile = work.appendingPathComponent("all.csg")
-        try run(openscad, ["--export-format=csg", "-o", csgFile.path, input.path],
-                cwd: input.deletingLastPathComponent(), timeout: Options().timeout)
+        let log = try run(openscad, ["--export-format=csg", "-o", csgFile.path, source.path],
+                          cwd: input.deletingLastPathComponent(), timeout: Options().timeout)
+        let values = markerValues(from: log, count: expressions.count, expressions: expressions)
 
         let text = try String(contentsOf: csgFile, encoding: .utf8)
         let tree = CSGSplitter.parse(text)
@@ -344,10 +354,10 @@ extension ScadRenderer {
         // OpenSCAD keeps no object identity — the CSG dump has only geometry and operator
         // nodes, no module names — so the id is ours: the index after merging, which is
         // deterministic for a given design.
-        // The design's own names, if it carries any: read from the .scad, since comments do not
-        // survive into the CSG dump. Falls back to the id when a piece has none.
-        let scad = (try? String(contentsOf: input, encoding: .utf8)) ?? ""
-        let pieces = CSGSplitter.components(in: tree, source: scad).enumerated().map { index, component -> [String: Any] in
+        // The design's own names, if it carries any. Comments do not survive into the CSG dump,
+        // so they come from the .scad text; a piece with none keeps its id.
+        let pieces = CSGSplitter.components(in: tree, source: scad, values: values)
+            .enumerated().map { index, component -> [String: Any] in
             var entry = encode(component.box)
             entry["id"] = index + 1
             if let profile = component.profile { entry["profile"] = profile }
@@ -399,6 +409,36 @@ extension ScadRenderer {
 
     /// As `runProcess`, but a non-zero exit is an error — for steps with no output file to judge.
     @discardableResult
+    /// A copy of the design that also echoes each expression, so one run yields both the tree
+    /// and the numbers. `include` rather than `use`: only `include` brings the variables in.
+    private static func withEchoes(of input: URL, _ expressions: [String], in work: URL) -> URL {
+        var text = "include <\(input.path)>;\n"
+        for (index, expression) in expressions.enumerated() {
+            text += "echo(str(\"@@\", \(index), \"=\", \(expression)));\n"
+        }
+        let file = work.appendingPathComponent("echoes.scad")
+        guard (try? text.write(to: file, atomically: true, encoding: .utf8)) != nil else { return input }
+        return file
+    }
+
+    /// `ECHO: "@@3=4"` lines back into values. A missing or non-numeric one is left out, and the
+    /// marker that needed it then claims nothing rather than guessing at a count.
+    private static func markerValues(from log: String, count: Int,
+                                     expressions: [String]) -> [String: Int] {
+        var result: [String: Int] = [:]
+        for line in log.split(separator: "\n") {
+            guard let at = line.range(of: "@@") else { continue }
+            let body = line[at.upperBound...].prefix(while: { $0 != "\"" })
+            let parts = body.split(separator: "=", maxSplits: 1)
+            // Double first, then narrow: OpenSCAD echoes numbers as `2` or `2.0`, and Int(_:)
+            // on a Double traps rather than failing, so the finiteness check is not optional.
+            guard parts.count == 2, let index = Int(parts[0]), index < expressions.count,
+                  let number = Double(parts[1]), number.isFinite else { continue }
+            result[expressions[index]] = Int(number)
+        }
+        return result
+    }
+
     private static func run(_ binary: String, _ arguments: [String],
                             cwd: URL, timeout: TimeInterval) throws -> String {
         let result = try runProcess(binary, arguments, cwd: cwd, timeout: timeout)
