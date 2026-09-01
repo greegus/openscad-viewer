@@ -379,6 +379,22 @@ a temp file and renaming it over the original, which replaces the inode and leav
 watch pointing at something nobody will write to again. Events are coalesced and checked against
 the file's mtime, so one save costs one render.
 
+**Command palette** (Cmd-K) searches every action the viewer has: modes, projection, the six
+standard views, the overlays, both tools, the selection commands, and whatever the host can do.
+It lives in the page rather than in AppKit, because nearly every action is the page's own — and
+so it works in the Quick Look panel too, which has no menu bar and no toolbar. Toggles are named
+for what they will do ("Hide edges" while they are on), and host actions appear only where they
+exist: the Quick Look panel has neither an export nor a reload, and listing something that
+cannot run is worse than not listing it. Matching is substring, ranked so a word that starts
+with the query wins — with a couple of dozen actions, fuzzy matching mostly produces surprises.
+
+**Live reload.** A save in your editor re-renders the model and leaves the camera exactly where
+you put it; only the grid and the clip planes follow the new geometry, since an edit can change
+its size. `FileWatcher` watches the file *and* its directory, because editors save in two ways
+and either watch alone misses one — measured: writing in place never touches the directory, and
+saving atomically replaces the inode a file watch is holding. The directory watch is also what
+re-arms the file watch after a replacement.
+
 **Reload** (Cmd-R) re-reads the file and puts the view back the way it opened — hidden pieces
 restored, camera reframed. Deliberately more than the automatic refresh that follows a change
 on disk, which only replaces the geometry.

@@ -53,6 +53,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let fileMenu = NSMenu(title: "File")
         fileMenu.addItem(withTitle: "Open…", action: #selector(NSDocumentController.openDocument(_:)), keyEquivalent: "o")
         fileMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        fileMenu.addItem(withTitle: "Command Palette…",
+                         action: #selector(ViewerViewController.showCommandPalette(_:)),
+                         keyEquivalent: "k")
+        fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Reload", action: #selector(ViewerViewController.reloadModel(_:)),
                          keyEquivalent: "r")
         fileMenu.addItem(.separator())

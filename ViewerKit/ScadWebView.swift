@@ -21,6 +21,7 @@ final class ScadWebView: NSView, WKScriptMessageHandler, WKNavigationDelegate {
     private var pendingPieces: Bool?
     private var pendingProjection: String?
     private var pendingView: String?
+    private var pendingHostActions: [String]?
 
     /// Messages the page sends back, so the controls can follow what the viewer is doing.
     var onMessage: ((String) -> Void)?
@@ -108,6 +109,19 @@ final class ScadWebView: NSView, WKScriptMessageHandler, WKNavigationDelegate {
         webView.evaluateJavaScript("setProjection('\(kind)')")
     }
 
+    /// Which actions the host can run, so the palette lists only what will actually work —
+    /// the Quick Look panel has neither an export nor a reload.
+    func setHostActions(_ ids: [String]) {
+        guard loaded else { pendingHostActions = ids; return }
+        let list = ids.map { "'\($0)'" }.joined(separator: ", ")
+        webView.evaluateJavaScript("setHostActions([\(list)])")
+    }
+
+    func openPalette() {
+        guard loaded else { return }
+        webView.evaluateJavaScript("openPalette()")
+    }
+
     /// Back to the opening state: hidden pieces restored and the camera reframed.
     func resetView() {
         guard loaded else { return }
@@ -136,6 +150,7 @@ final class ScadWebView: NSView, WKScriptMessageHandler, WKNavigationDelegate {
         if let pieces = pendingPieces { setPieces(pieces); pendingPieces = nil }
         if let projection = pendingProjection { setProjection(projection); pendingProjection = nil }
         if let name = pendingView { setView(name); pendingView = nil }
+        if let ids = pendingHostActions { setHostActions(ids); pendingHostActions = nil }
     }
 
     func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: Error) {

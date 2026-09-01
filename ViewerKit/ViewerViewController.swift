@@ -32,6 +32,21 @@ private final class RootView: NSView {
 
 open class ViewerViewController: NSViewController, QLPreviewingController {
 
+    /// Actions the page cannot perform itself, by id. The host names what it can do and
+    /// handles the callback; the viewer only carries the request across.
+    public var hostActions: [String] = [] {
+        didSet { if isViewLoaded { webView.setHostActions(hostActions) } }
+    }
+
+    /// Called when the palette runs one of `hostActions`.
+    public var onHostAction: ((String) -> Void)?
+
+    /// Opens the command palette — for a menu item, since a key equivalent is taken by the
+    /// menu before the page ever sees it.
+    @objc public func showCommandPalette(_ sender: Any?) {
+        webView.openPalette()
+    }
+
     /// Where the geometry comes from — in-process for an app, over XPC for an extension.
     public var geometryProvider: GeometryProvider?
 
@@ -158,9 +173,15 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
 
         // The viewer tells us when the camera has been rotated off a preset direction.
         webView.onMessage = { [weak self] text in
-            guard text == "view: none" else { return }
-            DispatchQueue.main.async { self?.viewPicker.selectedSegment = -1 }
+            guard let self else { return }
+            if text == "view: none" {
+                DispatchQueue.main.async { self.viewPicker.selectedSegment = -1 }
+            } else if text.hasPrefix("action: ") {
+                let id = String(text.dropFirst("action: ".count))
+                DispatchQueue.main.async { self.onHostAction?(id) }
+            }
         }
+        webView.setHostActions(hostActions)
 
         let subviews: [NSView] = [webView, controlRow, spinner, message]
         for v in subviews { root.addSubview(v) }

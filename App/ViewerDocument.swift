@@ -29,6 +29,14 @@ final class ViewerDocument: NSDocument, NSWindowDelegate, NSToolbarDelegate {
     override func makeWindowControllers() {
         let viewer = ViewerViewController()
         viewer.geometryProvider = provider   // an app may render in process
+        viewer.hostActions = ["exportSTL", "reload"]
+        viewer.onHostAction = { [weak self] id in
+            switch id {
+            case "exportSTL": self?.exportSTL(nil)
+            case "reload": viewer.reloadModel(nil)
+            default: break
+            }
+        }
         self.viewer = viewer
 
         let window = NSWindow(contentViewController: viewer)
