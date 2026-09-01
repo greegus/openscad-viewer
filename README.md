@@ -143,6 +143,14 @@ never learns which host it is in — that difference used to live inside it.
 - **The control row** lives in one `NSStackView`, centred while it fits and clamped to the
   left edge when it does not: the left constraint is required, the right one optional, so a
   row too wide for the panel gives way on the right instead of hiding the mode picker.
+A shaped cut is clipped against its **prism**, not its bounding box, and contributes the rim it
+leaves where it enters and leaves the piece. The box will not do: a cylinder of radius half the
+side has a box the size of the whole cube, and clipping against that erases every edge the cube
+has. The rim is the cut's own profile drawn at the depths the piece stops it — and it is real
+geometry that the mesh cannot supply, since a cylindrical wall is smooth and a tangent line is
+not a crease. `Tests/cylinder.scad`: 396 outline segments, being the cube's 12 edges plus two
+cuts times two circles of 96.
+
 ### What counts as an edge
 
 Worth naming, because "edge" means several different things in a CSG model and the viewer treats

@@ -219,57 +219,91 @@ function subtractSpan(spans, s, e) {
 ///   - on a flush bound it does not — the cut reaches the piece's surface there, so the
 ///     material behind the edge is gone. A groove milled right out to the end of a board used
 ///     to leave the board's original top edge drawn across the removed strip.
-function surviving(a, b, overlaps) {
+function surviving(a, b, cutters) {
   let spans = [[0, 1]];
-  const eps = 1e-6;
-  const axes = ['x', 'y', 'z'];
-  const d = b.clone().sub(a);
-
-  for (const { box, lo, hi } of overlaps) {
-    let t0 = 0, t1 = 1;
-    for (let i = 0; i < 3; i++) {
-      const axis = axes[i];
-      const min = box.min[axis] + (lo[i] ? -eps : eps);
-      const max = box.max[axis] + (hi[i] ? eps : -eps);
-      if (Math.abs(d[axis]) < 1e-12) {
-        if (a[axis] < min || a[axis] > max) { t0 = 1; t1 = 0; break; }
-      } else {
-        let ta = (min - a[axis]) / d[axis];
-        let tb = (max - a[axis]) / d[axis];
-        if (ta > tb) { const s = ta; ta = tb; tb = s; }
-        t0 = Math.max(t0, ta);
-        t1 = Math.min(t1, tb);
-        if (t0 >= t1) break;
-      }
-    }
-    if (t0 < t1) spans = subtractSpan(spans, Math.max(t0, 0), Math.min(t1, 1));
+  for (const cutter of cutters) {
+    const span = cutter.profile ? insidePrism(a, b, cutter) : insideOverlap(a, b, cutter.overlap);
+    if (span) spans = subtractSpan(spans, Math.max(span[0], 0), Math.min(span[1], 1));
     if (!spans.length) break;
   }
   return spans;
 }
 
-/// The 12 edges of a box, as pairs of world-space points.
-function boxEdges(min, max, matrix) {
-  const c = [min, max];
-  const at = (i, j, k) => new THREE.Vector3(c[i].x, c[j].y, c[k].z).applyMatrix4(matrix);
-  const out = [];
-  for (const [f, t] of [
-    [[0, 0, 0], [1, 0, 0]], [[1, 0, 0], [1, 1, 0]], [[1, 1, 0], [0, 1, 0]], [[0, 1, 0], [0, 0, 0]],
-    [[0, 0, 1], [1, 0, 1]], [[1, 0, 1], [1, 1, 1]], [[1, 1, 1], [0, 1, 1]], [[0, 1, 1], [0, 0, 1]],
-    [[0, 0, 0], [0, 0, 1]], [[1, 0, 0], [1, 0, 1]], [[1, 1, 0], [1, 1, 1]], [[0, 1, 0], [0, 1, 1]],
-  ]) out.push([at(...f), at(...t)]);
-  return out;
+/// The span of a segment inside a shaped cut — an extruded convex profile.
+///
+/// The bounding box will not do here: a cylinder of radius half the side has a box the size of
+/// the whole cube, and clipping against that erases every edge the cube has. So the segment is
+/// taken into the cutter's own space and clipped against the depth range and then against each
+/// edge of the profile as a half-plane.
+function insidePrism(a, b, cutter) {
+  const p = a.clone().applyMatrix4(cutter.fromPiece);
+  const q = b.clone().applyMatrix4(cutter.fromPiece);
+  const d = q.clone().sub(p);
+  const eps = 1e-6;
+  let t0 = 0, t1 = 1;
+
+  // Depth first.
+  if (Math.abs(d.z) < 1e-12) {
+    if (p.z < cutter.min.z - eps || p.z > cutter.max.z + eps) return null;
+  } else {
+    let ta = (cutter.min.z - p.z) / d.z;
+    let tb = (cutter.max.z - p.z) / d.z;
+    if (ta > tb) { const t = ta; ta = tb; tb = t; }
+    t0 = Math.max(t0, ta);
+    t1 = Math.min(t1, tb);
+    if (t0 >= t1) return null;
+  }
+
+  // Then the profile, as one half-plane per edge. Counter-clockwise, so inside is to the left.
+  const n = cutter.profile.length;
+  for (let i = 0; i < n; i++) {
+    const [px, py] = cutter.profile[i];
+    const [qx, qy] = cutter.profile[(i + 1) % n];
+    const nx = -(qy - py);
+    const ny = qx - px;
+    const da = nx * (p.x - px) + ny * (p.y - py);
+    const db = nx * (q.x - px) + ny * (q.y - py);
+    if (da < eps && db < eps) return null;             // wholly outside this edge
+    if (Math.abs(db - da) < 1e-12) continue;           // parallel and inside
+    const t = da / (da - db);
+    if (da < db) t0 = Math.max(t0, t); else t1 = Math.min(t1, t);
+    if (t0 >= t1) return null;
+  }
+  return [t0, t1];
 }
 
-/// Mesh vertices into a piece's own coordinates.
+/// The span inside a plain box cut, worked out in the piece's own coordinates.
 ///
-/// A piece's box comes from the CSG and lives in model space (Z up); a mesh sits in the scene
-/// (Y up). Skipping MODEL_TO_WORLD here puts every vertex outside every box — silently, since
-/// the result is simply "nothing matched".
-function meshToPiece(mesh, box) {
-  const worldToModel = new THREE.Matrix4().copy(MODEL_TO_WORLD).invert();
-  return new THREE.Matrix4()
-    .multiplyMatrices(box.inverse, new THREE.Matrix4().multiplyMatrices(worldToModel, mesh.matrixWorld));
+/// Each bound is known to be either a pocket wall inside the piece or flush with its surface,
+/// and that decides how a segment lying exactly on the bound is treated: on a pocket wall it
+/// survives, because the wall is a real face; on a flush bound it does not, because the cut
+/// reaches the surface there and the material behind the edge is gone. A groove milled right out
+/// to the end of a board otherwise left the board's original top edge drawn across the strip
+/// that had been removed.
+function insideOverlap(a, b, overlap) {
+  if (!overlap) return null;
+  const { box, lo, hi } = overlap;
+  const eps = 1e-6;
+  const axes = ['x', 'y', 'z'];
+  const d = b.clone().sub(a);
+  let t0 = 0, t1 = 1;
+
+  for (let i = 0; i < 3; i++) {
+    const axis = axes[i];
+    const min = box.min[axis] + (lo[i] ? -eps : eps);
+    const max = box.max[axis] + (hi[i] ? eps : -eps);
+    if (Math.abs(d[axis]) < 1e-12) {
+      if (a[axis] < min || a[axis] > max) return null;
+    } else {
+      let ta = (min - a[axis]) / d[axis];
+      let tb = (max - a[axis]) / d[axis];
+      if (ta > tb) { const t = ta; ta = tb; tb = t; }
+      t0 = Math.max(t0, ta);
+      t1 = Math.min(t1, tb);
+      if (t0 >= t1) return null;
+    }
+  }
+  return [t0, t1];
 }
 
 /// Clips world-space triangles to a piece's box, as a flat array of positions.
@@ -511,15 +545,16 @@ function overlapEdges({ box, lo, hi }, matrix) {
 /// between piece and cutter contributes its own edges too.
 export function pieceOutline(component) {
   const box = prepareBox(component);
-  const overlaps = (component.cutters ?? [])
-    .map((c) => {
-      const overlap = overlapInPieceSpace(box, prepareBox(c));
-      // A cutter that only bounds its real shape — a rounded handle recess, say — still says
-      // where material went, but its box corners are not the pocket's corners.
-      if (overlap) overlap.approximate = c.approximate === true;
-      return overlap;
-    })
-    .filter(Boolean);
+  const cutters = (component.cutters ?? []).map((c) => {
+    const cut = prepareBox(c);
+    cut.profile = c.profile ?? null;
+    cut.approximate = c.approximate === true;
+    // Piece space into this cutter's own space, so a profile can be honoured where it exists.
+    cut.fromPiece = new THREE.Matrix4().multiplyMatrices(cut.inverse, box.matrix);
+    cut.toPiece = new THREE.Matrix4().copy(cut.fromPiece).invert();
+    cut.overlap = overlapInPieceSpace(box, cut);
+    return cut;
+  });
 
   const points = [];
   // Edges are built in the piece's coordinates, clipped there, and only then placed in the
@@ -540,15 +575,74 @@ export function pieceOutline(component) {
   // The piece's own edges, with the cut-away spans removed. A board with a rounded corner
   // follows its extruded profile; anything else is a box.
   emit(component.profile ? profileEdges(component.profile, box) : boxEdges(box.min, box.max, identity),
-       overlaps);
+       cutters);
 
-  // The edges each cut leaves behind, minus anything another cut removed in turn.
-  overlaps.forEach((overlap, index) => {
-    if (overlap.approximate) return;      // would draw square corners on a rounded pocket
-    emit(overlapEdges(overlap, identity), overlaps.filter((_, i) => i !== index));
+  // What each cut leaves behind.
+  cutters.forEach((cutter, index) => {
+    const others = cutters.filter((_, i) => i !== index);
+    if (cutter.profile) {
+      emit(holeEdges(cutter, box), others);
+    } else if (cutter.overlap && !cutter.approximate) {
+      emit(overlapEdges(cutter.overlap, identity), others);
+    }
   });
 
   return points;
+}
+
+/// The 12 edges of a box, as pairs of points in whatever space `matrix` maps into.
+function boxEdges(min, max, matrix) {
+  const c = [min, max];
+  const at = (i, j, k) => new THREE.Vector3(c[i].x, c[j].y, c[k].z).applyMatrix4(matrix);
+  const out = [];
+  for (const [f, t] of [
+    [[0, 0, 0], [1, 0, 0]], [[1, 0, 0], [1, 1, 0]], [[1, 1, 0], [0, 1, 0]], [[0, 1, 0], [0, 0, 0]],
+    [[0, 0, 1], [1, 0, 1]], [[1, 0, 1], [1, 1, 1]], [[1, 1, 1], [0, 1, 1]], [[0, 1, 1], [0, 0, 1]],
+    [[0, 0, 0], [0, 0, 1]], [[1, 0, 0], [1, 0, 1]], [[1, 1, 0], [1, 1, 1]], [[0, 1, 0], [0, 1, 1]],
+  ]) out.push([at(...f), at(...t)]);
+  return out;
+}
+
+/// The rim a shaped cut leaves where it enters and leaves the piece.
+///
+/// A hole drilled through a board is bounded by two circles, one on each face — and they are its
+/// only edges, because the cylindrical wall is smooth and a tangent line is not a crease. Those
+/// circles are the cutter's own profile, drawn at the depths where the piece actually stops it.
+function holeEdges(cutter, box) {
+  const zLow = Math.max(cutter.min.z, depthLimit(cutter, box, false));
+  const zHigh = Math.min(cutter.max.z, depthLimit(cutter, box, true));
+  if (!(zHigh > zLow)) return [];
+
+  const edges = [];
+  for (const z of [zLow, zHigh]) {
+    for (let i = 0; i < cutter.profile.length; i++) {
+      const p = cutter.profile[i];
+      const q = cutter.profile[(i + 1) % cutter.profile.length];
+      edges.push([
+        new THREE.Vector3(p[0], p[1], z).applyMatrix4(cutter.toPiece),
+        new THREE.Vector3(q[0], q[1], z).applyMatrix4(cutter.toPiece),
+      ]);
+    }
+  }
+  return edges;
+}
+
+/// How deep into the cutter the piece reaches, along the cutter's own extrusion axis.
+///
+/// The piece's eight corners bound it: exact while both are axis-aligned, which is every cut in
+/// practice, and a safe over-estimate when one is turned.
+function depthLimit(cutter, box, upper) {
+  const v = new THREE.Vector3();
+  let bound = upper ? -Infinity : Infinity;
+  for (const x of [box.min.x, box.max.x]) {
+    for (const y of [box.min.y, box.max.y]) {
+      for (const z of [box.min.z, box.max.z]) {
+        v.set(x, y, z).applyMatrix4(cutter.fromPiece);
+        bound = upper ? Math.max(bound, v.z) : Math.min(bound, v.z);
+      }
+    }
+  }
+  return bound;
 }
 
 // --- features: lines and arcs ---

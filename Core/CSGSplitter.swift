@@ -111,16 +111,24 @@ extension CSGSplitter {
         var size: [Double]
         var centered: Bool
 
+        /// The shape this box stands for, in its own 2D coordinates, when it has one — a circle
+        /// for a cylinder, a rounded outline for an extrusion. Without it a round cut can only be
+        /// approximated by its bounding box, and for a cylinder of radius half the side that box
+        /// *is* the whole cube.
+        var profile: [[Double]]?
+
         /// True when this only *bounds* the real shape — an extruded cutter, say, whose profile
         /// is rounded. Good enough to clip an outline with, but its own edges are not the
         /// shape's edges, so nothing may be drawn from them.
         var approximate = false
 
-        init(matrix: [Double], size: [Double], centered: Bool, approximate: Bool = false) {
+        init(matrix: [Double], size: [Double], centered: Bool, approximate: Bool = false,
+             profile: [[Double]]? = nil) {
             self.matrix = matrix
             self.size = size
             self.centered = centered
             self.approximate = approximate
+            self.profile = profile
         }
     }
 
@@ -211,6 +219,7 @@ extension CSGSplitter {
             if n.name == "cylinder", let made = cylinderBox(n.args, current) {
                 var box = made.box
                 box.approximate = true
+                box.profile = made.profile
                 out.append(box)
                 return
             }
@@ -221,6 +230,7 @@ extension CSGSplitter {
             if n.name == "linear_extrude", let made = extrude(n, current) {
                 var box = made.box
                 box.approximate = true
+                box.profile = made.profile
                 out.append(box)
                 return
             }
