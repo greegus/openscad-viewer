@@ -110,6 +110,18 @@ extension CSGSplitter {
         var matrix: [Double]     // 4×4, row-major (matches three.js Matrix4.set)
         var size: [Double]
         var centered: Bool
+
+        /// True when this only *bounds* the real shape — an extruded cutter, say, whose profile
+        /// is rounded. Good enough to clip an outline with, but its own edges are not the
+        /// shape's edges, so nothing may be drawn from them.
+        var approximate = false
+
+        init(matrix: [Double], size: [Double], centered: Bool, approximate: Bool = false) {
+            self.matrix = matrix
+            self.size = size
+            self.centered = centered
+            self.approximate = approximate
+        }
     }
 
     struct Component {
@@ -160,6 +172,15 @@ extension CSGSplitter {
             }
             if n.name == "cube", let c = cube(from: n.args) {
                 out.append(Box(matrix: current, size: c.size, centered: c.centered))
+            }
+            // A cut is not always a cube — a drawer's handle is an extruded rounded profile.
+            // Without this the front's outline was never clipped and ran straight across the
+            // recess. Bounded rather than exact, and flagged as such.
+            if n.name == "linear_extrude", let made = extrude(n, current) {
+                var box = made.box
+                box.approximate = true
+                out.append(box)
+                return
             }
             for child in n.children { collectBoxes(child, current, into: &out) }
         }

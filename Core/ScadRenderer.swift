@@ -332,7 +332,8 @@ extension ScadRenderer {
         // The piece outlines ride along in the same header — they are derived from the CSG
         // we already have, so they cost nothing extra.
         func encode(_ b: CSGSplitter.Box) -> [String: Any] {
-            ["matrix": b.matrix, "size": b.size, "centered": b.centered]
+            ["matrix": b.matrix, "size": b.size, "centered": b.centered,
+             "approximate": b.approximate]
         }
         // OpenSCAD keeps no object identity — the CSG dump has only geometry and operator
         // nodes, no module names — so the id is ours: the index after merging, which is

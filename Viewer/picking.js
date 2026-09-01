@@ -301,7 +301,13 @@ function overlapEdges({ box, lo, hi }, matrix) {
 export function pieceOutline(component) {
   const box = prepareBox(component);
   const overlaps = (component.cutters ?? [])
-    .map((c) => overlapInPieceSpace(box, prepareBox(c)))
+    .map((c) => {
+      const overlap = overlapInPieceSpace(box, prepareBox(c));
+      // A cutter that only bounds its real shape — a rounded handle recess, say — still says
+      // where material went, but its box corners are not the pocket's corners.
+      if (overlap) overlap.approximate = c.approximate === true;
+      return overlap;
+    })
     .filter(Boolean);
 
   const points = [];
@@ -327,6 +333,7 @@ export function pieceOutline(component) {
 
   // The edges each cut leaves behind, minus anything another cut removed in turn.
   overlaps.forEach((overlap, index) => {
+    if (overlap.approximate) return;      // would draw square corners on a rounded pocket
     emit(overlapEdges(overlap, identity), overlaps.filter((_, i) => i !== index));
   });
 
