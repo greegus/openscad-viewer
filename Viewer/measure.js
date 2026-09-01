@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { toScreen, cursorPx, buildEdgeList, buildFeatures, featureUnderCursor, makeClickDetector } from './picking.js';
+import { toScreen, cursorPx, pieceFeatures, featureUnderCursor, makeClickDetector } from './picking.js';
 import { createStroke } from './strokes.js';
 
 /// Geometry inspection: snapping to edges and measuring the distance between them.
@@ -39,14 +39,17 @@ export function createMeasure({ scene, view, renderer, readout }) {
 
   // --- geometry ---
 
-  /// Edges come from EdgesGeometry (same threshold as x-ray), transformed into world
-  /// coordinates so measuring does not depend on the model's rotation, then grouped into
-  /// features — so a tessellated rounded corner is picked as one arc, exactly as in Inspect.
-  /// Takes every material part, so you can measure across materials (wood to glass).
-  function setTargets(targets) {
-    state.features = buildFeatures(buildEdgeList(targets));
-    state.meshes = targets.map((t) => t.mesh);
+  /// Edges come from the pieces, the same source Inspect and the overlay use — so what you can
+  /// measure is exactly what you can see and select. A tessellated rounded corner arrives as one
+  /// arc, and an edge belongs to one piece rather than running across everything welded to it.
+  function setTargets(pieces) {
+    state.features = pieceFeatures(pieces ?? []);
     clear();
+  }
+
+  /// The meshes are needed separately, only to decide what hides an edge from view.
+  function setOccluders(meshes) {
+    state.meshes = meshes ?? [];
   }
 
   /// In x-ray the whole point is to reach what is behind, so occlusion is dropped there.
@@ -210,7 +213,7 @@ export function createMeasure({ scene, view, renderer, readout }) {
   }
 
   return {
-    setTargets, setEnabled, setOcclusion, clear, update,
+    setTargets, setOccluders, setEnabled, setOcclusion, clear, update,
     // Diagnostic hooks: they let the maths be verified without simulating clicks.
     edges: () => state.features.flatMap((f) => f.segments).map((e, i) => ({
       i,

@@ -103,7 +103,6 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
     private var projectionPicker: NSSegmentedControl!
     private var viewPicker: NSSegmentedControl!
     private var edgesToggle: NSButton!
-    private var piecesToggle: NSButton!
     private let spinner = NSProgressIndicator()
     private let message = NSTextField(labelWithString: "")
     private var fileURL: URL?
@@ -141,9 +140,6 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
         edgesToggle.state = .on          // matches the viewer's default
         edgesToggle.translatesAutoresizingMaskIntoConstraints = false
 
-        piecesToggle = NSButton(checkboxWithTitle: "Parts", target: self, action: #selector(togglePieces))
-        piecesToggle.state = .on          // matches the viewer's default
-        piecesToggle.translatesAutoresizingMaskIntoConstraints = false
 
         // A toggle-button group rather than a picker: either tool can be switched off again,
         // so `.selectAny` plus mutual exclusion in the action, not `.selectOne`.
@@ -166,12 +162,12 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
         // One stack for the whole control row: it stays centred while it fits and clamps to
         // the left edge when it does not, rather than being cut off on both sides.
         controlRow = NSStackView(views: [modePicker, projectionPicker, viewPicker,
-                                         edgesToggle, piecesToggle, toolPicker])
+                                         edgesToggle, toolPicker])
         controlRow.orientation = .horizontal
         controlRow.alignment = .centerY
         controlRow.spacing = 10
         controlRow.setCustomSpacing(14, after: viewPicker)
-        controlRow.setCustomSpacing(14, after: piecesToggle)
+        controlRow.setCustomSpacing(14, after: edgesToggle)
         controlRow.translatesAutoresizingMaskIntoConstraints = false
 
         // The viewer tells us when the camera has been rotated off a preset direction.
@@ -255,10 +251,6 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
         let index = viewPicker.selectedSegment
         guard Self.views.indices.contains(index) else { return }
         webView.setView(Self.views[index].id)
-    }
-
-    @objc private func togglePieces() {
-        webView.setPieces(piecesToggle.state == .on)
     }
 
     @objc private func changeTool() {

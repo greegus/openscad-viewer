@@ -18,7 +18,6 @@ final class ScadWebView: NSView, WKScriptMessageHandler, WKNavigationDelegate {
     private var pendingMode: String?
     private var pendingTool: String?
     private var pendingEdges: Bool?
-    private var pendingPieces: Bool?
     private var pendingProjection: String?
     private var pendingView: String?
     private var pendingHostActions: [String]?
@@ -92,11 +91,6 @@ final class ScadWebView: NSView, WKScriptMessageHandler, WKNavigationDelegate {
     }
 
     /// Outline of every individual piece on/off — shows how parts join inside the union.
-    func setPieces(_ on: Bool) {
-        guard loaded else { pendingPieces = on; return }
-        webView.evaluateJavaScript("setPieces(\(on))")
-    }
-
     /// One of the standard viewing directions: "3d", "front", "left", "right", "top".
     func setView(_ name: String) {
         guard loaded else { pendingView = name; return }
@@ -147,7 +141,6 @@ final class ScadWebView: NSView, WKScriptMessageHandler, WKNavigationDelegate {
         if let mode = pendingMode { setMode(mode); pendingMode = nil }
         if let tool = pendingTool { setTool(tool); pendingTool = nil }
         if let edges = pendingEdges { setEdges(edges); pendingEdges = nil }
-        if let pieces = pendingPieces { setPieces(pieces); pendingPieces = nil }
         if let projection = pendingProjection { setProjection(projection); pendingProjection = nil }
         if let name = pendingView { setView(name); pendingView = nil }
         if let ids = pendingHostActions { setHostActions(ids); pendingHostActions = nil }

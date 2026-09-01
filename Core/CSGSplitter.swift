@@ -205,6 +205,16 @@ extension CSGSplitter {
             if n.name == "cube", let c = cube(from: n.args) {
                 out.append(Box(matrix: current, size: c.size, centered: c.centered))
             }
+            // Nor is a cut always a box: a drilled hole is a cylinder. Bounded and flagged as
+            // approximate, so it clips an outline without contributing square corners of its own
+            // to a round hole.
+            if n.name == "cylinder", let made = cylinderBox(n.args, current) {
+                var box = made.box
+                box.approximate = true
+                out.append(box)
+                return
+            }
+
             // A cut is not always a cube — a drawer's handle is an extruded rounded profile.
             // Without this the front's outline was never clipped and ran straight across the
             // recess. Bounded rather than exact, and flagged as such.
@@ -230,6 +240,12 @@ extension CSGSplitter {
             // A board with a rounded corner is an extruded profile, not a cube. Without this it
             // had no piece at all: the Parts overlay skipped it, and holding the modifier fell
             // through to "the whole connected solid" — which, after the union, is the model.
+            if n.name == "cylinder", !removed, let made = cylinderBox(n.args, current) {
+                result.append(Component(box: made.box, cutters: cutters, profile: made.profile,
+                                        path: path))
+                return
+            }
+
             if n.name == "linear_extrude", !removed, let made = extrude(n, current) {
                 result.append(Component(box: made.box, cutters: cutters, profile: made.profile,
                                         path: path))
@@ -626,6 +642,43 @@ extension CSGSplitter {
             }
         }
         return out
+    }
+
+    /// A `cylinder` as a box plus the circle it extrudes.
+    ///
+    /// A cylinder is `linear_extrude(h) circle(r)` under another name, so it is measured the same
+    /// way: the box bounds it, and the profile carries the round outline sampled at the same `$fn`
+    /// OpenSCAD used, so the outline lands on the mesh rather than near it.
+    ///
+    /// The x/y centring is folded into the transform rather than into `centered`, which is
+    /// all-or-nothing across the three axes: a cylinder is centred in x and y but starts at z = 0
+    /// unless asked otherwise, and neither setting of that flag can say so.
+    ///
+    /// A cone (`r1 != r2`) gets the box alone. Its outline changes along the extrusion and a
+    /// single profile cannot describe that; the box at least says where the material is.
+    private static func cylinderBox(_ args: String, _ transform: [Double]) -> (box: Box, profile: [[Double]]?)? {
+        let numbers = named(in: args)
+        guard let height = numbers["h"], height > 0 else { return nil }
+        let r1 = numbers["r1"] ?? numbers["r"] ?? (numbers["d1"] ?? numbers["d"]).map { $0 / 2 }
+        let r2 = numbers["r2"] ?? numbers["r"] ?? (numbers["d2"] ?? numbers["d"]).map { $0 / 2 }
+        guard let low = r1, let high = r2, max(low, high) > 0 else { return nil }
+
+        let radius = Swift.max(low, high)
+        let centered = args.contains("center = true")
+        let placement = multiply(transform, [1, 0, 0, -radius,
+                                             0, 1, 0, -radius,
+                                             0, 0, 1, centered ? -height / 2 : 0,
+                                             0, 0, 0, 1])
+        let box = Box(matrix: placement, size: [radius * 2, radius * 2, height], centered: false)
+
+        guard abs(low - high) < 1e-9 else { return (box, nil) }
+        let sides = Int(numbers["$fn"] ?? 0)
+        let n = sides >= 3 ? sides : 32
+        let profile = (0..<n).map { i -> [Double] in
+            let a = 2 * Double.pi * Double(i) / Double(n)
+            return [radius + radius * cos(a), radius + radius * sin(a)]
+        }
+        return (box, profile)
     }
 
     private static func cube(from args: String) -> (size: [Double], centered: Bool)? {

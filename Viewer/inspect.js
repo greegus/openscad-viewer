@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { toScreen, cursorPx, pointToSegment2D, buildEdgeList, buildFeatures, featureUnderCursor, axisName, pieceOutline, trianglesTouchingBox, clipToBox, clipFeatureToPiece, MODEL_TO_WORLD } from './picking.js';
+import { toScreen, cursorPx, pointToSegment2D, pieceFeatures, featureUnderCursor,
+         axisName, trianglesTouchingBox, clipToBox, MODEL_TO_WORLD } from './picking.js';
 import { createStroke } from './strokes.js';
 
 /// Inspect: hover highlights what is under the cursor, a click selects it.
@@ -17,7 +18,9 @@ import { createStroke } from './strokes.js';
 export function createInspect({ scene, view, renderer, readout, onSelect }) {
 
   const canvas = renderer.domElement;
-  const state = { enabled: false, features: [], pieces: [], meshes: [], groups: new Map(), occlude: true };
+  const state = {
+    enabled: false, features: [], pieces: [], meshes: [], groups: new Map(), occlude: true,
+  };
 
   const HOVER = 0xffd60a;
   const SELECT = 0xff9f0a;
@@ -102,7 +105,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     return { find, groups, planes, findBody, bodies };
   }
 
-  function setTargets({ parts, components }) {
+  function setTargets({ parts, pieces }) {
     state.meshes = parts.map((p) => p.mesh);
     state.groups = new Map();
     for (const mesh of state.meshes) {
@@ -110,32 +113,10 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
       state.groups.set(mesh, buildFaceGroups(mesh));
     }
 
-    // Pieces before features: chaining edges into features needs to know where one piece ends,
-    // or a run welded across two boards becomes a single feature spanning both.
-    state.pieces = (components ?? []).map((c) => {
-      const local = new THREE.Matrix4().set(...c.matrix);
-      const world = new THREE.Matrix4().multiplyMatrices(MODEL_TO_WORLD, local);
-      const [sx, sy, sz] = c.size;
-      const min = c.centered ? new THREE.Vector3(-sx / 2, -sy / 2, -sz / 2) : new THREE.Vector3(0, 0, 0);
-      // The same clipped outline the Parts overlay uses, so the two never disagree.
-      const outline = pieceOutline(c).slice();
-      for (let i = 0; i < outline.length; i += 3) {
-        const p = new THREE.Vector3(outline[i], outline[i + 1], outline[i + 2]).applyMatrix4(MODEL_TO_WORLD);
-        outline[i] = p.x; outline[i + 1] = p.y; outline[i + 2] = p.z;
-      }
-      // Model-space corner: the coordinate you can search for in the .scad source.
-      const origin = [c.matrix[3], c.matrix[7], c.matrix[11]];
-      const corner = c.centered ? origin.map((v, i) => v - c.size[i] / 2) : origin;
-      return {
-        id: c.id, corner, source: c,
-        size: c.size, world, inverse: world.clone().invert(), outline,
-        box: new THREE.Box3(min, min.clone().add(new THREE.Vector3(sx, sy, sz))),
-      };
-    });
-
-    state.features = buildFeatures(
-      buildEdgeList(parts.map((p) => ({ mesh: p.mesh, edgesGeometry: p.edges.geometry }))),
-      state.pieces);
+    // Pieces are handed in already built, and the features come from their outlines — so a
+    // feature belongs to exactly one piece by construction rather than by being trimmed later.
+    state.pieces = pieces ?? [];
+    state.features = pieceFeatures(state.pieces);
     clear();
   }
 
@@ -308,12 +289,8 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     // Only edges you can actually see, unless x-ray is on — there, seeing through is the point.
     const feature = featureUnderCursor(px, state.features, view.camera, canvas, 6,
                                        state.occlude ? state.meshes : null);
-    if (feature) {
-      // Limited to the piece the cursor is nearest, for a run welded across several boards.
-      const near = nearestPointOn(feature, px);
-      return { type: 'edge',
-               feature: clipFeatureToPiece(feature, near ? pieceAt(near) : null) };
-    }
+    // A feature already belongs to one piece, so there is nothing left to trim.
+    if (feature) return { type: 'edge', feature, piece: feature.piece };
 
     const h = hit(px);
     if (!h) return null;
@@ -345,23 +322,6 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
   /// Description as label/value pairs, listed one per line under the heading. A single run-on
   /// line was fine while there were two numbers; there are now six, and they need scanning
   /// rather than reading.
-  /// The point on a feature closest to the cursor, in world space — which piece the edge is
-  /// being asked about depends on where along it you are pointing.
-  function nearestPointOn(feature, px) {
-    let best = null;
-    let bestDistance = Infinity;
-    for (const seg of feature.segments) {
-      const a = toScreen(seg.a, view.camera, canvas);
-      const b = toScreen(seg.b, view.camera, canvas);
-      const { distance, t } = pointToSegment2D(px, a, b);
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        best = seg.a.clone().lerp(seg.b, t);
-      }
-    }
-    return best;
-  }
-
   function describe(target) {
     if (!target) return [];
     if (target.type === 'edge') {
@@ -712,6 +672,26 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
              px: [Math.round(px.x), Math.round(px.y)] };
   };
 
+  /// How many mesh creases fall inside a piece's box. Tells apart "the picker cannot find this
+  /// piece's edges" from "this piece has no creases, because it is welded flush to its
+  /// neighbours and no crease exists there to find".
+  const edgesInPiece = (id) => {
+    const piece = state.pieces.find((p) => p.id === id);
+    if (!piece) return null;
+    const v = new THREE.Vector3();
+    const slack = 1;
+    let segments = 0;
+    for (const f of state.features) {
+      for (const seg of f.segments) {
+        v.copy(seg.a).add(seg.b).multiplyScalar(0.5).applyMatrix4(piece.inverse);
+        if (v.x >= piece.box.min.x - slack && v.x <= piece.box.max.x + slack
+         && v.y >= piece.box.min.y - slack && v.y <= piece.box.max.y + slack
+         && v.z >= piece.box.min.z - slack && v.z <= piece.box.max.z + slack) segments++;
+      }
+    }
+    return segments;
+  };
+
   const debug = () => ({
     lastEvent,
     hovered: hovered ? {
@@ -757,5 +737,6 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     centre: [f.centre.x, f.centre.y, f.centre.z].map((v) => Math.round(v)),
   }));
 
-  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, arcPoint, selection, highlightPiece, highlightPieces, selectPiece, features, longestFeature, clear, update };
+  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, arcPoint, selection, highlightPiece, highlightPieces, selectPiece, features, longestFeature, edgesInPiece,
+           clear, update };
 }

@@ -152,7 +152,7 @@ import { STLLoader } from './vendor/STLLoader.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { createMeasure } from './measure.js';
 import { createInspect } from './inspect.js';
-import { pieceOutline, trianglesInBox, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
+import { buildPieceModel, trianglesInBox, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
 import { updateStrokeResolution } from './strokes.js';
 import { createGrid } from './grid.js';
 import { createPalette } from './palette.js';
@@ -450,9 +450,12 @@ scene.add(fill);
 
 let parts = [];        // [{ mesh, xray, edges, geometry, rgba }]
 let mode = 'normal';
+// One switch for edges, because there is now one source for them. There used to be two
+// overlays — mesh creases and CSG piece outlines — which showed different sets of lines and
+// invited the question of which was right.
 let edgesOn = true;
-let piecesOn = true;
-let pieceLines = null;     // one LineSegments with every piece outline merged in
+let pieceModel = [];
+let edgeLines = null;     // one LineSegments with every piece outline merged in
 let measure = null;
 let grid = null;
 let inspect = null;
@@ -533,7 +536,7 @@ function setMode(name) {
   for (const p of parts) {
     p.mesh.visible = m.solid;
     p.xray.visible = m.xray;
-    p.edges.visible = edgesOn;
+
   }
   inspect?.setOcclusion(name === 'normal');
   measure?.setOcclusion(name === 'normal');
@@ -544,7 +547,7 @@ function setMode(name) {
 // solid view and for reading structure in x-ray.
 function setEdges(on) {
   edgesOn = !!on;
-  for (const p of parts) p.edges.visible = edgesOn;
+  if (edgeLines) edgeLines.visible = edgesOn;
   window.webkit?.messageHandlers?.viewer?.postMessage('edges: ' + edgesOn);
 }
 
@@ -617,15 +620,16 @@ resize();
 /// Hand the tools the current geometry. Needed after loading and after anything is hidden or
 /// brought back, since both tools cache edge lists built from it.
 function retarget() {
-  measure?.setTargets(parts.map((p) => ({ mesh: p.mesh, edgesGeometry: p.edges.geometry })));
-  inspect?.setTargets({ parts, components: components.filter((c) => !hiddenIds.has(c.id)) });
+  measure?.setTargets(pieceModel);
+  measure?.setOccluders(parts.map((p) => p.mesh));
+  inspect?.setTargets({ parts, pieces: pieceModel });
 }
 
 function clearParts() {
   for (const p of parts) {
-    scene.remove(p.mesh, p.xray, p.edges);
+    scene.remove(p.mesh, p.xray);
     p.geometry.dispose();
-    p.edges.geometry.dispose();
+
   }
   parts = [];
 }
@@ -636,15 +640,12 @@ function addPart(buffer, rgba) {
 
   const mesh = new THREE.Mesh(geometry, solidMaterial(rgba));
   const xray = new THREE.Mesh(geometry, xrayMaterial(rgba));   // its own material instance
-  const edges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(geometry, 20),
-    edgeMaterial());
 
-  for (const o of [mesh, xray, edges]) {
+  for (const o of [mesh, xray]) {
     scene.add(orientToWorld(o));
   }
-  // The pristine geometry is kept: hiding rebuilds from it, so restoring is exact.
-  parts.push({ mesh, xray, edges, geometry, source: geometry.clone(), rgba });
+
+  parts.push({ mesh, xray, geometry, source: geometry.clone(), rgba });
 }
 
 /// Draws the outline of every individual piece.
@@ -654,33 +655,27 @@ function addPart(buffer, rgba) {
 /// come from the CSG tree instead, where each piece is still its own box.
 /// Drawn exactly like the mesh edges — same black, same opacity, depth-tested — so turning
 /// this on simply adds the missing seams to the drawing instead of showing hidden pieces.
-function buildPieces(components) {
-  if (pieceLines) {
-    scene.remove(pieceLines);
-    pieceLines.geometry.dispose();
-    pieceLines = null;
+/// The one edge overlay: every edge of every visible piece.
+///
+/// Points are already in world space — buildPieceModel put them there — so this must not be
+/// oriented again.
+function buildEdgeOverlay(pieces) {
+  if (edgeLines) {
+    scene.remove(edgeLines);
+    edgeLines.geometry.dispose();
+    edgeLines = null;
   }
-  if (!components?.length) return;
+  if (!pieces?.length) return;
 
   const points = [];
-  for (const c of components) {
-    const [sx, sy, sz] = c.size;
-    if (!(sx > 0 && sy > 0 && sz > 0)) continue;
-    points.push(...pieceOutline(c));
-  }
+  for (const piece of pieces) points.push(...piece.outline);
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
-  pieceLines = new THREE.LineSegments(geometry, edgeMaterial());
-  orientToWorld(pieceLines);
-  pieceLines.visible = piecesOn;
-  scene.add(pieceLines);
-}
-
-function setPieces(on) {
-  piecesOn = !!on;
-  if (pieceLines) pieceLines.visible = piecesOn;
-  window.webkit?.messageHandlers?.viewer?.postMessage('pieces: ' + piecesOn);
+  edgeLines = new THREE.LineSegments(geometry, edgeMaterial());
+  edgeLines.visible = edgesOn;
+  scene.add(edgeLines);
+  section?.setOverlay(edgeLines);
 }
 
 // --- hiding ---
@@ -722,11 +717,12 @@ function applyHidden() {
     part.mesh.geometry = geometry;
     part.xray.geometry = geometry;
 
-    part.edges.geometry.dispose();
-    part.edges.geometry = new THREE.EdgesGeometry(geometry, 20);
+
   }
 
-  buildPieces(components.filter((c) => !hiddenIds.has(c.id)));
+  // The model, and the overlay built from it, both drop what is hidden.
+  pieceModel = buildPieceModel(components.filter((c) => !hiddenIds.has(c.id)));
+  buildEdgeOverlay(pieceModel);
   retarget();
   tree?.refresh();
 }
@@ -809,7 +805,8 @@ async function load() {
     }
 
     components = manifest?.components ?? [];
-    buildPieces(components);
+    pieceModel = buildPieceModel(components);
+    buildEdgeOverlay(pieceModel);
     tree.setComponents(components);
 
     grid ??= createGrid({ scene });
@@ -856,7 +853,6 @@ tick();
 window.loadMesh = load;
 window.setMode = setMode;
 window.setEdges = setEdges;
-window.setPieces = setPieces;
 window.setTool = setTool;
 window.setProjection = setProjection;
 window.setView = setView;
@@ -884,7 +880,6 @@ function paletteActions() {
   }
 
   add('Overlay', edgesOn ? 'Hide edges' : 'Show edges', () => setEdges(!edgesOn));
-  add('Overlay', piecesOn ? 'Hide parts' : 'Show parts', () => setPieces(!piecesOn));
 
   add('Tool', tool === 'inspect' ? 'Stop inspecting' : 'Inspect',
       () => setTool(tool === 'inspect' ? 'none' : 'inspect'));
@@ -957,9 +952,9 @@ window.debug = {
     projection,
     activeView,
     edges: edgesOn,
-    pieces: piecesOn,
+    pieces: pieceModel.length,
     tool,
-    pieceSegments: pieceLines ? pieceLines.geometry.attributes.position.count / 2 : 0,
+    pieceSegments: edgeLines ? edgeLines.geometry.attributes.position.count / 2 : 0,
     parts: parts.map((p) => ({
       rgba: p.rgba,
       triangles: p.geometry.attributes.position.count / 3,
@@ -1003,6 +998,16 @@ window.debug = {
   components: () => components,
   features: () => inspect?.features() ?? [],
   longestFeature: () => inspect?.longestFeature() ?? null,
+  setOcclusion: (on) => inspect?.setOcclusion(on),
+  edgesInPiece: (id) => inspect?.edgesInPiece(id) ?? null,
+  /// World point to canvas pixels, so a test can point where a real cursor would.
+  worldToScreen: (w) => {
+    const ndc = new THREE.Vector3(w[0], w[1], w[2]).project(view.camera);
+    if (Math.abs(ndc.x) > 1 || Math.abs(ndc.y) > 1) return null;
+    const r = canvas.getBoundingClientRect();
+    return [Math.round((ndc.x * 0.5 + 0.5) * r.width), Math.round((-ndc.y * 0.5 + 0.5) * r.height)];
+  },
+  setEdgeClipping: (on) => inspect?.setEdgeClipping(on),
   /// Renders one frame and hands back the pixels. The only way to settle a question about what
   /// is actually drawn rather than what is in the buffers.
   /// Near-white pixels in the rendered frame. The stroke halo is white, so this answers
@@ -1034,10 +1039,8 @@ window.debug = {
     return n;
   },
   snapshot: () => { renderer.render(scene, view.camera); return canvas.toDataURL('image/png'); },
-  pieceOutline: (id) => {
-    const c = components.find((x) => x.id === id);
-    return c ? pieceOutline(c) : [];
-  },
+  /// A piece's outline, in world space — straight from the model everything else uses.
+  pieceOutline: (id) => pieceModel.find((p) => p.id === id)?.outline ?? [],
   section: () => section.debug,
   // How many of the three materials on each part actually carry the clipping plane — a plane
   // missed on one of them leaves its edges hanging in the cut.

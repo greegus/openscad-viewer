@@ -124,6 +124,64 @@ export function axisName(direction) {
 
 // --- piece outlines ---
 
+/// The pieces a design is built from, each with its own faces and edges.
+///
+/// One source of truth, and the reason this exists: edges used to come from two unrelated
+/// places. `EdgesGeometry(mesh, 20°)` found creases in the welded mesh, which knows nothing
+/// about pieces — so an edge could run across three boards, and where a shelf butts flush into
+/// a wall no crease exists at all and there was nothing to pick. Piece outlines came from the
+/// CSG, which knows exactly where one piece ends. Hover used the first, a selected piece used
+/// the second, and they disagreed on screen.
+///
+/// Everything structural now comes from the CSG: outlines, picking, and the edge overlay. The
+/// mesh is still what gets shaded — only CGAL knows the true solid — but it no longer decides
+/// what counts as an edge.
+export function buildPieceModel(components) {
+  return (components ?? []).map((c) => {
+    const local = new THREE.Matrix4().set(...c.matrix);
+    const world = new THREE.Matrix4().multiplyMatrices(MODEL_TO_WORLD, local);
+    const [sx, sy, sz] = c.size;
+    const min = c.centered ? new THREE.Vector3(-sx / 2, -sy / 2, -sz / 2)
+                           : new THREE.Vector3(0, 0, 0);
+
+    // Model space for the outline, then straight into the world, so every consumer gets the
+    // same coordinates and nobody has to remember which space they are in.
+    const outline = pieceOutline(c).slice();
+    for (let i = 0; i < outline.length; i += 3) {
+      const v = new THREE.Vector3(outline[i], outline[i + 1], outline[i + 2])
+        .applyMatrix4(MODEL_TO_WORLD);
+      outline[i] = v.x; outline[i + 1] = v.y; outline[i + 2] = v.z;
+    }
+
+    const origin = [c.matrix[3], c.matrix[7], c.matrix[11]];
+    return {
+      id: c.id, name: c.name, groups: c.groups ?? [], source: c,
+      size: c.size, world, inverse: world.clone().invert(), outline,
+      corner: c.centered ? origin.map((v, i) => v - c.size[i] / 2) : origin,
+      box: new THREE.Box3(min, min.clone().add(new THREE.Vector3(sx, sy, sz))),
+    };
+  });
+}
+
+/// Pickable features, grouped per piece.
+///
+/// Built one piece at a time on purpose: a feature then cannot span two pieces, which is what
+/// the mesh-crease version had to be patched against after the fact.
+export function pieceFeatures(pieces) {
+  const out = [];
+  for (const piece of pieces) {
+    const edges = [];
+    const o = piece.outline;
+    for (let i = 0; i < o.length; i += 6) {
+      const a = new THREE.Vector3(o[i], o[i + 1], o[i + 2]);
+      const b = new THREE.Vector3(o[i + 3], o[i + 4], o[i + 5]);
+      if (a.distanceTo(b) > 1e-6) edges.push({ a, b });
+    }
+    for (const f of buildFeatures(edges)) out.push({ ...f, piece });
+  }
+  return out;
+}
+
 /// A box from the CSG, prepared for hit-testing and clipping.
 export function prepareBox(b) {
   const matrix = new THREE.Matrix4().set(...b.matrix);
@@ -564,7 +622,12 @@ export function clipFeatureToPiece(feature, piece) {
   const outside = loose.some((span) => !span || span[0] > 1e-6 || span[1] < 1 - 1e-6);
   if (!outside) return feature;
 
-  const spans = feature.segments.map((seg) => insideBox(seg.a, seg.b, piece, 0));
+  // Not zero. The mesh arrives through ASCII STL, so a coordinate near 1850 mm carries error in
+  // the thousandths, and an edge lying *on* a box face can fall outside it. A straight edge of a
+  // board lies on two faces at once and so has two chances to be dropped, while an arc rim lies
+  // on one — which is exactly how a zero tolerance left only arc rims pickable. At 0.01 mm the
+  // length is off by at most a fiftieth of a millimetre, below what the readout shows.
+  const spans = feature.segments.map((seg) => insideBox(seg.a, seg.b, piece, 0.01));
   const segments = [];
   let length = 0;
   for (const [i, span] of spans.entries()) {
@@ -582,32 +645,7 @@ export function clipFeatureToPiece(feature, piece) {
            a: segments[0].a, b: segments[segments.length - 1].b };
 }
 
-export function buildFeatures(edges, pieces = []) {
-  /// Which pieces an edge belongs to, as a sorted key.
-  ///
-  /// A chain may only run while this stays the same. CGAL welds coplanar faces, so the front
-  /// edges of two boards flush with each other come out as one continuous run — and a chain that
-  /// does not know where a piece ends becomes a single 2 m feature covering both, which is what
-  /// hovering one board then lit up. An edge shared by two pieces has both in its key, so the
-  /// seam itself stays whole rather than splitting down the middle.
-  const owners = (edge) => {
-    if (!pieces.length) return '';
-    const mid = edge.a.clone().add(edge.b).multiplyScalar(0.5);
-    const v = new THREE.Vector3();
-    const slack = 0.5;
-    const found = [];
-    for (const piece of pieces) {
-      v.copy(mid).applyMatrix4(piece.inverse);
-      if (v.x >= piece.box.min.x - slack && v.x <= piece.box.max.x + slack
-       && v.y >= piece.box.min.y - slack && v.y <= piece.box.max.y + slack
-       && v.z >= piece.box.min.z - slack && v.z <= piece.box.max.z + slack) {
-        found.push(piece.id ?? 0);
-      }
-    }
-    return found.sort((x, y) => x - y).join(',');
-  };
-  const ownerKey = edges.map(owners);
-
+export function buildFeatures(edges) {
   const byVertex = new Map();
   edges.forEach((e, i) => {
     for (const v of [e.a, e.b]) {
@@ -633,7 +671,6 @@ export function buildFeatures(edges, pieces = []) {
         if (incident.length !== 2) break;                    // corner or junction: stop
         const next = incident.find((j) => !used[j]);
         if (next === undefined) break;
-        if (ownerKey[next] !== ownerKey[i]) break;           // a different piece starts here
         used[next] = true;
         const e = edges[next];
         const far = vertexKey(e.a) === k ? e.b : e.a;

@@ -162,10 +162,22 @@ them differently:
 The last two columns matter: on a rounded corner there is **no edge along the curve**, only a
 silhouette, so an edge tool has nothing to offer there and that is correct rather than broken.
 
-There are also two independent edge pipelines, which is worth knowing before debugging one:
-`EdgesGeometry(mesh, 20°)` derives creases from the welded mesh and drives the **Edges** overlay
-and everything the inspect tool picks; `pieceOutline(component)` derives outlines from the CSG
-boxes and profiles and drives the **Parts** overlay and a selected piece's outline.
+There used to be two independent edge pipelines and they disagreed on screen. Creases came from
+`EdgesGeometry(mesh, 20°)`, which knows nothing about pieces: an edge could run across three
+boards welded flush, and where a shelf butts into a wall the faces end up coplanar so no crease
+exists and there was nothing to pick — on the corner shelf only the arc rim, the one boundary
+in open space, responded at all. Outlines came from the CSG, which knows exactly where a piece
+ends. Hover used the first, a selected piece the second.
+
+Everything structural now comes from the CSG. `buildPieceModel()` is the single place a piece is
+assembled, and `pieceFeatures()` builds the pickable features one piece at a time, so a feature
+cannot span two pieces — not because it is trimmed afterwards, but because it cannot be built
+that way. One overlay, one toggle, and the same source for the overlay, Inspect and Measure, so
+what you see is what you can pick and what you can measure. The mesh is still what gets shaded —
+only CGAL knows the true solid — but it no longer decides what counts as an edge.
+
+Measured on kniznica.scad: 1228 mesh-crease features became 1658 CSG features, and on the corner
+shelf the share of its outline that can be picked went from 23 of 74 segments to 71.
 
 - **Zoom** puts both gestures under one law. A trackpad pinch arrives as a wheel event with
   `ctrlKey` set and a two-finger scroll as one without; they used to be handled differently —

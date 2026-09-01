@@ -33,7 +33,8 @@ export function createSection({ scene, renderer, view, readout }) {
   capGroup.renderOrder = 2;
   scene.add(capGroup);
 
-  let targets = [];        // { mesh, xray, edges, pieces }
+  let targets = [];        // { mesh, xray, colour }
+  let overlay = null;      // the single edge overlay
 
   /// Stencil pair per material: back faces add, front faces subtract. What remains set is
   /// solid where the plane cuts, and the cap quad is painted through that mask.
@@ -104,10 +105,16 @@ export function createSection({ scene, renderer, view, readout }) {
     const active = !!state.axis && (state.stage === 'ready' || state.stage === 'side');
     renderer.localClippingEnabled = active;
     for (const target of targets) {
-      for (const material of [target.mesh.material, target.xray.material, target.edges.material]) {
+      for (const material of [target.mesh.material, target.xray.material]) {
         material.clippingPlanes = active ? [plane] : [];
         material.needsUpdate = true;
       }
+    }
+    // The edge overlay is one object for the whole model, not one per material, so it takes the
+    // plane here rather than in the loop above. Missing it would leave edges hanging in the cut.
+    if (overlay) {
+      overlay.material.clippingPlanes = active ? [plane] : [];
+      overlay.material.needsUpdate = true;
     }
     capGroup.visible = active;
     report();
@@ -126,11 +133,17 @@ export function createSection({ scene, renderer, view, readout }) {
     /// The pieces to cut, and the extent to slide within.
     setTargets(parts, bounds) {
       targets = parts.map((p) => ({
-        mesh: p.mesh, xray: p.xray, edges: p.edges,
+        mesh: p.mesh, xray: p.xray,
         colour: new THREE.Color(p.rgba[0], p.rgba[1], p.rgba[2]),
       }));
       state.bounds = bounds;
       buildCaps();
+      updatePlane();
+    },
+
+    /// The edge overlay, rebuilt whenever pieces are hidden, so it is handed over each time.
+    setOverlay(lines) {
+      overlay = lines;
       updatePlane();
     },
 
