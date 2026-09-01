@@ -296,9 +296,17 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
         message.isHidden = false
     }
 
-    /// Re-renders from disk — for a file that changed under us.
+    /// Re-renders from disk — for a file that changed under us, or on demand.
     public func reload() {
         meshLoaded = false
         loadMesh()
+    }
+
+    /// Cmd-R: re-read the file and put the view back the way it opened — hidden pieces
+    /// restored, camera reframed. Deliberately more than `reload`, which only refreshes
+    /// geometry when the file changes underneath.
+    @objc public func reloadModel(_ sender: Any?) {
+        webView.resetView()
+        reload()
     }
 }

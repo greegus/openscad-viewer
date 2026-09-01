@@ -313,10 +313,14 @@ export function createInspect({ scene, view, renderer, readout }) {
       // Its surfaces as well as its outline: holding the modifier should show what would go,
       // not just where its edges run.
       if (piece) return { type: 'part', piece, mesh: h.object, triangles: trianglesOf(piece, h.object) };
-      // No CSG box here — an extruded piece, for instance. Fall back to the welded solid.
+      // No CSG box here. Fall back to the welded solid — but only if it is actually a piece:
+      // after the union most of a design is one connected body, and offering "the whole model"
+      // as a selection is never what the modifier is for.
       const info = state.groups.get(h.object);
       const triangles = info?.bodies.get(info.findBody(h.faceIndex));
-      return triangles
+      if (!triangles) return null;
+      const share = triangles.length / (h.object.geometry.attributes.position.count / 3);
+      return share < 0.5
         ? { type: 'body', mesh: h.object, triangles, point: h.point }
         : null;
     }

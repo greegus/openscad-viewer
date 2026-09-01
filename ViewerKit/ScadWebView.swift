@@ -108,6 +108,12 @@ final class ScadWebView: NSView, WKScriptMessageHandler, WKNavigationDelegate {
         webView.evaluateJavaScript("setProjection('\(kind)')")
     }
 
+    /// Back to the opening state: hidden pieces restored and the camera reframed.
+    func resetView() {
+        guard loaded else { return }
+        webView.evaluateJavaScript("resetView()")
+    }
+
     /// "none" or "measure".
     func setTool(_ tool: String) {
         guard loaded else { pendingTool = tool; return }

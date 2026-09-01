@@ -137,7 +137,8 @@ extension CSGSplitter {
     /// A positive operand that gets partly cut still contributes its full box: that is the
     /// piece's overall extent, and the cut itself already shows up in the mesh edges.
     ///
-    /// `linear_extrude` leaves (rounded front profiles here) are skipped — no box to draw.
+    /// `linear_extrude` is measured rather than skipped: the CSG dump flattens its 2D shape
+    /// into explicit polygons, so the outline can simply be read off — see `shape2D`.
     static func components(in node: Node) -> [Component] {
         var result: [Component] = []
 
@@ -161,6 +162,14 @@ extension CSGSplitter {
             if n.name == "cube", !removed, let c = cube(from: n.args) {
                 result.append(Component(box: Box(matrix: current, size: c.size, centered: c.centered),
                                         cutters: cutters))
+            }
+
+            // A board with a rounded corner is an extruded profile, not a cube. Without this it
+            // had no piece at all: the Parts overlay skipped it, and holding the modifier fell
+            // through to "the whole connected solid" — which, after the union, is the model.
+            if n.name == "linear_extrude", !removed, let box = extrude(n, current) {
+                result.append(Component(box: box, cutters: cutters))
+                return                       // its 2D children are a profile, not geometry
             }
 
             if n.name == "difference", let first = n.children.first {
@@ -253,6 +262,132 @@ extension CSGSplitter {
             return Component(box: Box(matrix: matrix, size: size, centered: false), cutters: [])
         }
         return rebuilt + passthrough
+    }
+
+    /// A `linear_extrude` as a box: the 2D profile's extent, raised to the extrusion height.
+    private static func extrude(_ node: Node, _ transform: [Double]) -> Box? {
+        let numbers = named(in: node.args)
+        guard let height = numbers["height"], height > 0 else { return nil }
+        let centered = node.args.contains("center = true")
+
+        var shape: (min: [Double], max: [Double])?
+        for child in node.children {
+            shape = union(shape, shape2D(child, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]))
+        }
+        guard let shape, shape.max[0] > shape.min[0], shape.max[1] > shape.min[1] else { return nil }
+
+        // The box sits at the profile's own offset, so fold that into the transform.
+        let placement = multiply(transform, [1, 0, 0, shape.min[0],
+                                             0, 1, 0, shape.min[1],
+                                             0, 0, 1, centered ? -height / 2 : 0,
+                                             0, 0, 0, 1])
+        return Box(matrix: placement,
+                   size: [shape.max[0] - shape.min[0], shape.max[1] - shape.min[1], height],
+                   centered: false)
+    }
+
+    /// Extent of a 2D subtree. The dump has already evaluated circles and hulls into polygons,
+    /// so this only has to combine what is left the way each operator does.
+    private static func shape2D(_ node: Node, _ transform: [Double]) -> (min: [Double], max: [Double])? {
+        var current = transform
+        if node.name == "multmatrix", let m = matrix(from: node.args) {
+            current = multiply(transform, m)
+        }
+
+        switch node.name {
+        case "polygon":
+            return transformed(points(in: node.args), current)
+        case "square":
+            let size = named(in: node.args)
+            let sx = size["size"] ?? sizePair(node.args)?.0 ?? 0
+            let sy = sizePair(node.args)?.1 ?? sx
+            guard sx > 0, sy > 0 else { return nil }
+            let centred = node.args.contains("center = true")
+            let low = centred ? [-sx / 2, -sy / 2] : [0, 0]
+            return transformed([low, [low[0] + sx, low[1] + sy]], current)
+        case "circle":
+            guard let r = named(in: node.args)["r"], r > 0 else { return nil }
+            return transformed([[-r, -r], [r, r]], current)
+        case "intersection":
+            // Only the overlap survives, so the extent is the intersection of the extents.
+            var result: (min: [Double], max: [Double])?
+            for child in node.children {
+                guard let box = shape2D(child, current) else { continue }
+                guard let current = result else { result = box; continue }
+                result = (min: [Swift.max(current.min[0], box.min[0]), Swift.max(current.min[1], box.min[1])],
+                          max: [Swift.min(current.max[0], box.max[0]), Swift.min(current.max[1], box.max[1])])
+            }
+            return result
+        case "difference":
+            // What is cut away can only shrink it, so the first operand bounds the result.
+            return node.children.first.flatMap { shape2D($0, current) }
+        case "offset":
+            let delta = named(in: node.args)["delta"] ?? named(in: node.args)["r"] ?? 0
+            guard let box = shape2D(node.children.first ?? node, current) else { return nil }
+            return (min: [box.min[0] - delta, box.min[1] - delta],
+                    max: [box.max[0] + delta, box.max[1] + delta])
+        default:
+            var result: (min: [Double], max: [Double])?
+            for child in node.children { result = union(result, shape2D(child, current)) }
+            return result
+        }
+    }
+
+    private static func union(_ a: (min: [Double], max: [Double])?,
+                              _ b: (min: [Double], max: [Double])?) -> (min: [Double], max: [Double])? {
+        guard let a else { return b }
+        guard let b else { return a }
+        return (min: [Swift.min(a.min[0], b.min[0]), Swift.min(a.min[1], b.min[1])],
+                max: [Swift.max(a.max[0], b.max[0]), Swift.max(a.max[1], b.max[1])])
+    }
+
+    private static func transformed(_ pts: [[Double]], _ m: [Double]) -> (min: [Double], max: [Double])? {
+        guard !pts.isEmpty else { return nil }
+        var lo = [Double.infinity, .infinity]
+        var hi = [-Double.infinity, -.infinity]
+        for p in pts {
+            let x = m[0] * p[0] + m[1] * p[1] + m[3]
+            let y = m[4] * p[0] + m[5] * p[1] + m[7]
+            lo = [Swift.min(lo[0], x), Swift.min(lo[1], y)]
+            hi = [Swift.max(hi[0], x), Swift.max(hi[1], y)]
+        }
+        return (min: lo, max: hi)
+    }
+
+    /// `points = [[x, y], …]` — the dump writes the profile out in full.
+    private static func points(in args: String) -> [[Double]] {
+        guard let start = args.range(of: "points = [") else { return [] }
+        let tail = args[start.upperBound...]
+        let end = tail.range(of: "]]")?.upperBound ?? tail.endIndex
+        let body = tail[..<end]
+
+        var result: [[Double]] = []
+        for pair in body.components(separatedBy: "[").dropFirst() {
+            let numbers = pair.split(whereSeparator: { !"0123456789.-e".contains($0) })
+                .compactMap { Double($0) }
+            if numbers.count >= 2 { result.append([numbers[0], numbers[1]]) }
+        }
+        return result
+    }
+
+    /// `name = value` pairs, for the scalars an operator carries.
+    private static func named(in args: String) -> [String: Double] {
+        var result: [String: Double] = [:]
+        for part in args.components(separatedBy: ",") {
+            let halves = part.components(separatedBy: "=")
+            guard halves.count == 2 else { continue }
+            let key = halves[0].trimmingCharacters(in: .whitespaces)
+            if let value = Double(halves[1].trimmingCharacters(in: .whitespaces)) { result[key] = value }
+        }
+        return result
+    }
+
+    private static func sizePair(_ args: String) -> (Double, Double)? {
+        guard let start = args.range(of: "size = [") else { return nil }
+        let tail = args[start.upperBound...]
+        let end = tail.firstIndex(of: "]") ?? tail.endIndex
+        let numbers = tail[..<end].split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        return numbers.count >= 2 ? (numbers[0], numbers[1]) : nil
     }
 
     private static let identity: [Double] = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]

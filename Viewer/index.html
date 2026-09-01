@@ -685,6 +685,13 @@ window.setTool = setTool;
 window.setProjection = setProjection;
 window.setView = setView;
 
+/// Back to how the file opened: geometry re-read, hidden pieces back, camera reframed.
+window.resetView = () => {
+  hidden.length = 0;
+  meshLoaded = false;
+  return load();
+};
+
 /// Everything a test harness needs, in one namespace — module scope is otherwise invisible
 /// from outside. Kept deliberately: each entry is what re-verifies a behaviour the README
 /// documents, and hardcoded screen coordinates go stale as the model changes.

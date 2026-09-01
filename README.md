@@ -176,6 +176,16 @@ never learns which host it is in — that difference used to live inside it.
   - A "face" is not a triangle. The mesh is a triangle soup, so faces are reconstructed once
     per part by welding triangles that share an edge and lie in the same plane — otherwise
     clicking a panel would select half a rectangle.
+  - Boards with a rounded corner are `linear_extrude`, not cubes, and used to have no piece at
+    all — the Parts overlay skipped them and holding the modifier fell through to "the whole
+    connected solid", which after the union is the entire model. The CSG dump flattens a 2D
+    profile into explicit `polygon(points = …)`, so `CSGSplitter.shape2D` can simply read its
+    extent, honouring what each operator does to it (`intersection` narrows to the overlap,
+    `difference` is bounded by its first operand, `offset` grows it). kniznica.scad: 51 pieces
+    before, 60 after, including the two 1850 x 450 x 15 boards.
+  - As a backstop for shapes that still cannot be boxed, the body fallback refuses anything
+    covering more than half the mesh: offering "the whole model" is never what the modifier is
+    for.
   - A "part" cannot come from the mesh at all: the union has welded the panels into one body.
     Parts come from the CSG components, same as the Parts overlay. Where boxes nest (a shelf
     inside a carcass) the smallest containing box wins.
@@ -361,6 +371,10 @@ editor. `FileWatcher` watches the *containing directory*, not the file: editors 
 a temp file and renaming it over the original, which replaces the inode and leaves a file-level
 watch pointing at something nobody will write to again. Events are coalesced and checked against
 the file's mtime, so one save costs one render.
+
+**Reload** (Cmd-R) re-reads the file and puts the view back the way it opened — hidden pieces
+restored, camera reframed. Deliberately more than the automatic refresh that follows a change
+on disk, which only replaces the geometry.
 
 **Export STL** sits in the window's toolbar and in File → Export STL… (Cmd-E). Both are
 untargeted actions, so the responder chain takes them to the document you are looking at
