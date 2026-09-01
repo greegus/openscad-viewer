@@ -8,10 +8,12 @@ import UniformTypeIdentifiers
 /// `@objc` with an explicit name on purpose: AppKit looks this class up from Info.plist by
 /// string, and a Swift class is otherwise registered under its mangled name.
 @objc(ViewerDocument)
-final class ViewerDocument: NSDocument, NSWindowDelegate {
+final class ViewerDocument: NSDocument, NSWindowDelegate, NSToolbarDelegate {
 
     private(set) var fileWatcher: FileWatcher?
     private weak var viewer: ViewerViewController?
+    private let provider = LocalGeometryProvider()
+    private var exporting = false
 
     override class var autosavesInPlace: Bool { false }
 
@@ -26,7 +28,7 @@ final class ViewerDocument: NSDocument, NSWindowDelegate {
 
     override func makeWindowControllers() {
         let viewer = ViewerViewController()
-        viewer.geometryProvider = LocalGeometryProvider()   // an app may render in process
+        viewer.geometryProvider = provider   // an app may render in process
         self.viewer = viewer
 
         let window = NSWindow(contentViewController: viewer)
@@ -40,6 +42,11 @@ final class ViewerDocument: NSDocument, NSWindowDelegate {
         window.delegate = self
         window.setFrameAutosaveName("ScadViewerWindow")
         window.collectionBehavior.insert(.fullScreenPrimary)   // green button / ⌃⌘F
+
+        let toolbar = NSToolbar(identifier: "ViewerToolbar")
+        toolbar.delegate = self
+        toolbar.displayMode = .iconAndLabel
+        window.toolbar = toolbar
 
         let controller = NSWindowController(window: window)
         addWindowController(controller)
@@ -57,6 +64,80 @@ final class ViewerDocument: NSDocument, NSWindowDelegate {
         fileWatcher = FileWatcher(url: url) { [weak self] in
             self?.viewer?.reload()
         }
+    }
+
+    // MARK: - Toolbar
+
+    private static let exportItem = NSToolbarItem.Identifier("exportSTL")
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.flexibleSpace, Self.exportItem]
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [Self.exportItem, .flexibleSpace, .space]
+    }
+
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier,
+                 willBeInsertedIntoToolbar: Bool) -> NSToolbarItem? {
+        guard id == Self.exportItem else { return nil }
+        let item = NSToolbarItem(itemIdentifier: id)
+        item.label = "Export STL"
+        item.toolTip = "Export the design as an STL mesh"
+        item.image = NSImage(systemSymbolName: "square.and.arrow.up",
+                             accessibilityDescription: "Export STL")
+        // Left to the responder chain rather than targeted at the document, so the menu item
+        // and the button reach the same place through the same route.
+        item.action = #selector(exportSTL(_:))
+        item.isBordered = true
+        return item
+    }
+
+    // MARK: - Export
+
+    /// Writes the design as a single STL.
+    ///
+    /// A full CGAL render, so seconds on a first run and instant afterwards from the cache.
+    /// Colour is not part of STL, so the per-material split the viewer uses does not apply.
+    @objc func exportSTL(_ sender: Any?) {
+        guard let url = fileURL, let window = windowControllers.first?.window else { return }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "stl") ?? .data]
+        panel.nameFieldStringValue = url.deletingPathExtension().lastPathComponent + ".stl"
+        panel.canCreateDirectories = true
+
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard response == .OK, let destination = panel.url, let self else { return }
+            self.exporting = true
+            self.viewer?.showBusy("Exporting STL…")
+
+            self.provider.mesh(for: url) { result in
+                self.exporting = false
+                self.viewer?.hideBusy()
+                switch result {
+                case .success(let data):
+                    do { try data.write(to: destination) }
+                    catch { self.report(error.localizedDescription, in: window) }
+                case .failure(let error):
+                    self.report(error.localizedDescription, in: window)
+                }
+            }
+        }
+    }
+
+    private func report(_ message: String, in window: NSWindow) {
+        let alert = NSAlert()
+        alert.messageText = "Could not export the STL"
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.beginSheetModal(for: window)
+    }
+
+    /// Grey the control out while an export is already running.
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(exportSTL(_:)) { return fileURL != nil && !exporting }
+        return super.validateUserInterfaceItem(item)
     }
 
     /// What zoom expands to. Without this AppKit derives a "standard" frame from the content,

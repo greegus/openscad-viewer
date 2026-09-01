@@ -116,7 +116,41 @@ function makeControls() {
   // The new pivot is picked along the view axis — the ray through the centre of the viewport —
   // so `camera.position - target` keeps its direction and a standard view stays active.
   renderer.domElement.addEventListener('pointerdown', recentrePivot, true);
+  renderer.domElement.addEventListener('wheel', handlePinch, { capture: true, passive: false });
 
+  controls.update();
+}
+
+/// Pinch on a trackpad reaches the page as a wheel event with `ctrlKey` set, but with much
+/// smaller deltas than a two-finger scroll — through OrbitControls' single zoomSpeed it ends up
+/// feeling far weaker. Handled separately so it gets its own scaling and lands in the same place
+/// a scroll would.
+const PINCH_SPEED = 0.02;      // per unit of deltaY
+const pinchState = { last: 0, delta: 0 };
+
+function handlePinch(event) {
+  if (!event.ctrlKey || !controls) return;      // a plain scroll: leave it to OrbitControls
+  event.preventDefault();
+  event.stopPropagation();
+
+  // Start of a gesture: aim at what is under the cursor, as a drag would.
+  const now = performance.now();
+  if (now - pinchState.last > 150) recentrePivot();
+  pinchState.last = now;
+  pinchState.delta = event.deltaY;
+
+  const factor = Math.exp(event.deltaY * PINCH_SPEED);
+  const camera = view.camera;
+  if (camera.isOrthographicCamera) {
+    // Orthographic has no distance to change — OrbitControls dollies it by zoom, so match that.
+    camera.zoom = Math.max(0.01, Math.min(1000, camera.zoom / factor));
+  } else {
+    const offset = camera.position.clone().sub(controls.target).multiplyScalar(factor);
+    const distance = Math.max(controls.minDistance,
+                              Math.min(controls.maxDistance, offset.length()));
+    camera.position.copy(controls.target).addScaledVector(offset.normalize(), distance);
+  }
+  camera.updateProjectionMatrix();
   controls.update();
 }
 
@@ -520,6 +554,10 @@ window.debug = {
     const m = worldToModelVector(view.camera.position.clone().sub(controls.target).normalize());
     return [m.x, m.y, m.z].map((v) => Math.round(v * 100) / 100);
   },
+
+  /// Pinch scaling, and the last delta seen — the multiplier can only really be judged
+  /// against a real trackpad, so it is adjustable from here.
+  pinch: (speed) => (speed === undefined ? { speed: PINCH_SPEED, lastDelta: pinchState.delta } : null),
 
   // Camera moves the controls would make, so preset invalidation can be tested: rotating
   // off a preset must clear it, zooming and panning must not.

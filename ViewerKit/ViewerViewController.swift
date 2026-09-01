@@ -277,6 +277,18 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
         }
     }
 
+    /// Spinner plus a line of text, for work the viewer itself did not start — an export, say.
+    public func showBusy(_ text: String) {
+        message.stringValue = text
+        message.isHidden = false
+        spinner.startAnimation(nil)
+    }
+
+    public func hideBusy() {
+        spinner.stopAnimation(nil)
+        message.isHidden = true
+    }
+
     private func show(error text: String) {
         message.stringValue = "Could not export the mesh:\n\(text)"
         message.isHidden = false

@@ -8,6 +8,20 @@ import Foundation
 final class XPCGeometryProvider: GeometryProvider {
 
     func materials(for url: URL, completion: @escaping (Result<Data, Error>) -> Void) {
+        request(url, completion) { proxy, path, source, reply in
+            proxy.exportMaterials(path: path, source: source, reply: reply)
+        }
+    }
+
+    func mesh(for url: URL, completion: @escaping (Result<Data, Error>) -> Void) {
+        request(url, completion) { proxy, path, source, reply in
+            proxy.exportMesh(path: path, source: source, reply: reply)
+        }
+    }
+
+    private func request(_ url: URL,
+                         _ completion: @escaping (Result<Data, Error>) -> Void,
+                         _ call: (ScadRenderService, String, Data, @escaping (Data?, String?) -> Void) -> Void) {
         let source = (try? Data(contentsOf: url)) ?? Data()
 
         let connection = NSXPCConnection(machServiceName: ServiceName.mach, options: [])
@@ -33,7 +47,7 @@ final class XPCGeometryProvider: GeometryProvider {
             return
         }
 
-        proxy.exportMaterials(path: url.path, source: source) { data, error in
+        call(proxy, url.path, source) { data, error in
             if let data {
                 finish(.success(data))
             } else {

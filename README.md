@@ -139,6 +139,13 @@ never learns which host it is in — that difference used to live inside it.
 - **The control row** lives in one `NSStackView`, centred while it fits and clamped to the
   left edge when it does not: the left constraint is required, the right one optional, so a
   row too wide for the panel gives way on the right instead of hiding the mode picker.
+- **Pinch zoom** is handled separately from scroll. A trackpad pinch arrives as a wheel event
+  with `ctrlKey` set but much smaller deltas, so through OrbitControls' single `zoomSpeed` it
+  felt far weaker than a two-finger scroll; it now gets its own scaling (`PINCH_SPEED`) and
+  re-aims the pivot at the start of a gesture, like a drag does. An orthographic camera has no
+  distance to change, so there it moves `camera.zoom`, matching what OrbitControls does.
+  `window.debug.pinch()` reports the current speed and the last delta seen — the multiplier can
+  only really be judged against a real trackpad.
 - **Controls** orbit around what the camera is aimed at, not the centre of the model: a
   detail you have zoomed into stays put when you rotate, instead of swinging away around the
   scene centre. The pivot is re-aimed as a gesture begins, one raycast per gesture, and is
@@ -334,6 +341,12 @@ editor. `FileWatcher` watches the *containing directory*, not the file: editors 
 a temp file and renaming it over the original, which replaces the inode and leaves a file-level
 watch pointing at something nobody will write to again. Events are coalesced and checked against
 the file's mtime, so one save costs one render.
+
+**Export STL** sits in the window's toolbar and in File → Export STL… (Cmd-E). Both are
+untargeted actions, so the responder chain takes them to the document you are looking at
+rather than to whichever was opened last. A single mesh, not the per-material split the
+viewer uses — STL has no notion of colour. It is a full CGAL render, so seconds the first
+time and instant from the cache afterwards.
 
 It registers as `Viewer` with rank `Alternate` for `org.openscad.scad`, so installing it does
 not take the double-click away from OpenSCAD itself.
