@@ -13,11 +13,12 @@ const EYE_OFF = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" str
   stroke-width="1.3"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z"/>
   <circle cx="8" cy="8" r="1.9"/><path d="M2.5 13.5 13.5 2.5"/></svg>`;
 
-export function createTree({ container, onToggle, isHidden, label, onHover }) {
+export function createTree({ container, onToggle, isHidden, label, onHover, onSelect }) {
 
   let roots = [];
   const collapsed = new Set();          // group keys the user folded shut
   let panelOpen = true;
+  let selectedId = null;
 
   /// Builds the group tree from the pieces' paths.
   function build(components) {
@@ -60,6 +61,30 @@ export function createTree({ container, onToggle, isHidden, label, onHover }) {
   const pieces = (node) =>
     node.pieces.concat([...node.children.values()].flatMap(pieces));
 
+  /// Marks the piece picked in the scene and brings its row into view, opening whatever it is
+  /// folded inside — a selection you cannot see is no help.
+  function select(id) {
+    if (id === selectedId) return;
+    selectedId = id;
+
+    if (id !== null && id !== undefined) {
+      for (const node of roots) reveal(node, id);
+      panelOpen = true;
+    }
+    render();
+    container.querySelector('.tree-row.is-selected')
+      ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  /// Unfolds every group between the root and the piece.
+  function reveal(node, id) {
+    const holds = pieces(node).some((p) => p.id === id);
+    if (!holds) return false;
+    collapsed.delete(node.key);
+    for (const child of node.children.values()) reveal(child, id);
+    return true;
+  }
+
   function render() {
     // The list is rebuilt on every change, which would otherwise jump back to the top each time
     // a piece is switched off — exactly when you are working partway down a long list.
@@ -68,9 +93,8 @@ export function createTree({ container, onToggle, isHidden, label, onHover }) {
 
     const header = document.createElement('button');
     header.className = 'tree-header';
-    const total = roots.flatMap(pieces).length;
     header.innerHTML = `<span class="tree-caret">${panelOpen ? '▾' : '▸'}</span>
-                        <span>Parts (${total})</span>`;
+                        <span>Parts</span>`;
     header.addEventListener('click', () => { panelOpen = !panelOpen; render(); });
     container.appendChild(header);
     if (!panelOpen) return;
@@ -100,11 +124,19 @@ export function createTree({ container, onToggle, isHidden, label, onHover }) {
     row.className = 'tree-row is-group';
     row.style.paddingLeft = `${6 + depth * 12}px`;
     row.innerHTML = `<button class="tree-caret">${isCollapsed ? '▸' : '▾'}</button>
-                     <span class="tree-name">${node.label ?? `Group ${index}`} · ${own.length}</span>
+                     <span class="tree-id">G${index}</span>
+                     <span class="tree-name"></span>
                      <button class="tree-eye"></button>`;
+    row.querySelector('.tree-name').textContent = node.label ?? 'Group';
     // Pointing at a group lights up everything under it, which is how you find out what a
     // group actually is — the names are ours, not the design's.
     hoverable(row, own.map((p) => p.id));
+    // The name is on the row, not on the caret, so clicking the name selects rather than folds.
+    row.querySelector('.tree-name').addEventListener('click', () => {
+      onSelect?.(own[0].id);
+      selectedId = own[0].id;
+      render();
+    });
     row.querySelector('.tree-caret').addEventListener('click', () => {
       if (isCollapsed) collapsed.delete(node.key); else collapsed.add(node.key);
       render();
@@ -137,9 +169,12 @@ export function createTree({ container, onToggle, isHidden, label, onHover }) {
   function renderPiece(piece, into, depth) {
     const off = isHidden(piece.id);
     const row = document.createElement('div');
-    row.className = 'tree-row' + (off ? ' is-off' : '');
+    row.className = 'tree-row' + (off ? ' is-off' : '')
+                  + (piece.id === selectedId ? ' is-selected' : '');
     row.style.paddingLeft = `${6 + depth * 12 + 14}px`;
-    row.innerHTML = `<span class="tree-name"></span><button class="tree-eye"></button>`;
+    row.innerHTML = `<span class="tree-id">#${piece.id}</span>
+                     <span class="tree-name"></span>
+                     <button class="tree-eye"></button>`;
     row.querySelector('.tree-name').textContent = label(piece);
 
     const eye = row.querySelector('.tree-eye');
@@ -147,12 +182,18 @@ export function createTree({ container, onToggle, isHidden, label, onHover }) {
     eye.classList.toggle('is-off', off);
     eye.title = off ? 'Show' : 'Hide';
     eye.addEventListener('click', () => onToggle([piece.id], off));
+    row.querySelector('.tree-name').addEventListener('click', () => {
+      onSelect?.(piece.id);
+      selectedId = piece.id;
+      render();
+    });
     hoverable(row, [piece.id]);
     into.appendChild(row);
   }
 
   return {
-    setComponents: (components) => { build(components); collapsed.clear(); render(); },
+    setComponents: (components) => { build(components); collapsed.clear(); selectedId = null; render(); },
+    select,
     refresh: render,
   };
 }

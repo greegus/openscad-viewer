@@ -385,6 +385,21 @@ without their tree paths and once without their hull outlines. Both times the co
 the data was stale, which is a genuinely confusing thing to debug. The cost is one slower render
 after an upgrade.
 
+**Cross section** (Cmd-K, or `Cut along X/Y/Z`) cuts the model with a plane and lets you look
+inside. Three states in the order you work in: pick the plane, pick which half goes, then slide
+it — the last stays live, so sliding is the tool rather than a step towards it. The plane is
+always perpendicular to a model axis, which is every cut worth making in furniture, and it
+starts in the middle of the model because a plane at the edge cuts nothing and looks broken.
+Arrow keys move it 1 mm, Shift 10 mm, Tab flips the kept side, Escape stops.
+
+The cut face is drawn rather than left open: clipping removes triangles and leaves a shell, so
+panels would look like paper. Filling it uses the stencil buffer — back faces increment, front
+faces decrement, and what the count says is inside gets painted in the material's colour. The
+renderer is created with `stencil: true` for this; it is not on everywhere by default. The plane
+goes on all three materials of every piece — solid, x-ray and edges — since edges missed there
+would hang out of the cut, and it comes *off* all of them when the tool stops, or the model
+stays cut and reads as missing geometry.
+
 **Naming pieces.** OpenSCAD has no notion of object identity — a module leaves no trace in the
 CSG dump and comments are stripped from it entirely — so names come from the `.scad` text:
 

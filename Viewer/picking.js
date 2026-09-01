@@ -270,6 +270,40 @@ export function clipToBox(mesh, triangles, component) {
   return out;
 }
 
+/// Triangles of `mesh` that reach into a piece's box at all.
+///
+/// For *showing* a piece, unlike hiding it. CGAL welds coplanar faces, so a triangle can cover
+/// this piece and the board flush beside it at once; demanding it lie wholly inside leaves a
+/// grey stripe across the highlight wherever that happens. Paired with `clipToBox`, which cuts
+/// those triangles back to the piece, the highlight is exact.
+export function trianglesTouchingBox(mesh, component) {
+  const box = prepareBox(component);
+  const toPiece = meshToPiece(mesh, box);
+  const position = mesh.geometry.attributes.position;
+  const v = new THREE.Vector3();
+  const slack = 0.5;
+  const found = [];
+
+  for (let i = 0; i < position.count / 3; i++) {
+    const low = [Infinity, Infinity, Infinity];
+    const high = [-Infinity, -Infinity, -Infinity];
+    for (let k = 0; k < 3; k++) {
+      v.fromBufferAttribute(position, i * 3 + k).applyMatrix4(toPiece);
+      const p = [v.x, v.y, v.z];
+      for (let a = 0; a < 3; a++) {
+        low[a] = Math.min(low[a], p[a]);
+        high[a] = Math.max(high[a], p[a]);
+      }
+    }
+    const min = [box.min.x, box.min.y, box.min.z];
+    const max = [box.max.x, box.max.y, box.max.z];
+    if ([0, 1, 2].every((a) => high[a] >= min[a] - slack && low[a] <= max[a] + slack)) {
+      found.push(i);
+    }
+  }
+  return found;
+}
+
 /// Triangles of `mesh` that lie wholly inside a piece's box.
 ///
 /// The union welds panels into one solid, so a piece owns no triangles; this recovers them

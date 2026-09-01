@@ -85,8 +85,29 @@
   }
   .tree-row:hover { background: rgba(255, 255, 255, 0.09); }
   .tree-row.is-off .tree-name { opacity: 0.4; text-decoration: line-through; }
+  .tree-row.is-selected { background: rgba(10, 132, 255, 0.85); }
+  .tree-row.is-selected:hover { background: rgba(10, 132, 255, 0.95); }
   .tree-row.is-group .tree-name { color: rgba(255, 255, 255, 0.72); font-weight: 600; }
-  .tree-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* The id is what you match against the model and the readout, so it is always present —
+     but quiet, since the name is what you read. */
+  .tree-id {
+    flex: none; min-width: 26px; font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.35); font-size: 11px;
+  }
+  .is-selected .tree-id { color: rgba(255, 255, 255, 0.7); }
+  .readout-title {
+    display: flex; align-items: baseline; gap: 6px;
+    font-weight: 600; margin-bottom: 3px;
+  }
+  .readout-id { color: rgba(255, 255, 255, 0.35); font-weight: 400; font-size: 11px;
+                font-variant-numeric: tabular-nums; }
+  /* Two columns, so values line up and can be compared down the panel. */
+  .readout-table {
+    display: grid; grid-template-columns: auto 1fr; gap: 2px 10px;
+    font-variant-numeric: tabular-nums;
+  }
+  .readout-key { color: rgba(255, 255, 255, 0.45); }
+  .tree-name { flex: 1; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tree-caret {
     appearance: none; border: 0; background: transparent; cursor: pointer;
     width: 14px; padding: 0; color: rgba(255, 255, 255, 0.45); font-size: 9px;
@@ -102,7 +123,8 @@
   .tree-row:hover .tree-eye, .tree-eye.is-off { opacity: 1; }
   .tree-eye.is-off { color: rgba(255, 255, 255, 0.4); }
   #readout {
-    position: absolute; left: 10px; bottom: 10px;
+    /* Right, opposite the parts list, so the two never overlap. */
+    position: absolute; right: 10px; top: 10px; max-width: 260px;
     padding: 6px 11px; border-radius: 8px;
     font: 12px -apple-system, system-ui, sans-serif;
     color: rgba(255, 255, 255, 0.92);
@@ -135,27 +157,70 @@ import { updateStrokeResolution } from './strokes.js';
 import { createGrid } from './grid.js';
 import { createPalette } from './palette.js';
 import { createTree } from './tree.js';
+import { createSection } from './section.js';
 
 const canvas = document.getElementById('canvas');
 const status = document.getElementById('status');
 const readoutEl = document.getElementById('readout');
+/// The details panel: an optional heading in the parts list's own format — name, then id in
+/// grey — and the description below it.
+function showReadout(text, heading) {
+  readoutEl.textContent = '';
+  if (heading) {
+    const title = document.createElement('div');
+    title.className = 'readout-title';
+    const name = document.createElement('span');
+    name.textContent = heading.name;
+    title.appendChild(name);
+    if (heading.id !== null && heading.id !== undefined) {
+      const id = document.createElement('span');
+      id.className = 'readout-id';
+      id.textContent = `#${heading.id}`;
+      title.appendChild(id);
+    }
+    readoutEl.appendChild(title);
+  }
+  // A plain string still works — the section tool writes one line of running text.
+  if (typeof text === 'string') {
+    const line = document.createElement('div');
+    line.textContent = text;
+    readoutEl.appendChild(line);
+    return;
+  }
+
+  const table = document.createElement('div');
+  table.className = 'readout-table';
+  for (const [label, value] of text ?? []) {
+    const key = document.createElement('span');
+    key.className = 'readout-key';
+    key.textContent = label;
+    const val = document.createElement('span');
+    val.textContent = value;
+    table.append(key, val);
+  }
+  readoutEl.appendChild(table);
+}
+
 const treeEl = document.getElementById('parts-tree');
 const tree = createTree({
   container: treeEl,
   onToggle: setHidden,
   isHidden: (id) => hiddenIds.has(id),
-  // The design's own name if it has one, the dimensions otherwise — those at least identify
-  // a piece, which a bare number does not.
-  label: (piece) => piece.name
-    ?? `#${piece.id} · ` + piece.size.map((v) => +v.toFixed(1)).join(' × ') + ' mm',
+  // The design's own name if it has one, the dimensions otherwise — those at least identify a
+  // piece, which a bare number does not. The id is rendered separately, in grey.
+  label: (piece) => piece.name ?? piece.size.map((v) => +v.toFixed(1)).join(' × ') + ' mm',
   // Hovering a row shows the piece in the scene. Only the first of a group: highlighting a
   // dozen at once needs machinery the inspect tool does not have, and the point is to find
   // where a row *is*, which one piece answers.
   onHover: (ids) => inspect?.highlightPiece(ids ? ids[0] : null),
+  // Selecting from the list needs the tool running, or there is nothing to select *into*.
+  onSelect: (id) => { setTool('inspect'); inspect?.selectPiece(id); },
 });
 const dark = matchMedia('(prefers-color-scheme: dark)').matches;
 
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+// `stencil` is not on by default in every context, and the section's cut face is drawn
+// through the stencil buffer — without it the model would be hollow where it is cut.
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, stencil: true });
 renderer.setPixelRatio(devicePixelRatio);
 
 const scene = new THREE.Scene();
@@ -263,6 +328,9 @@ function handlePinch(event) {
 
 /// Half the model's extent, kept so a camera can be given clip planes that reach it.
 let sceneRadius = 1000;
+
+/// Extent of the model in its own axes, for the section to slide within.
+let modelBounds = null;
 
 const pivotRay = new THREE.Raycaster();
 const pivotCentre = new THREE.Vector2(0, 0);   // NDC centre = the camera's own axis
@@ -470,8 +538,12 @@ function setTool(name) {
   // incoming tool has just written.
   inspect?.setEnabled(false);
   measure?.setEnabled(false);
+  // Stopping the section has to remove its clipping plane from every material. Left behind, it
+  // keeps cutting the model after the tool is off, which reads as missing geometry.
+  section?.stop();
   if (name === 'inspect') inspect?.setEnabled(true);
   if (name === 'measure') measure?.setEnabled(true);
+  if (name === 'section') section?.start();
   window.webkit?.messageHandlers?.viewer?.postMessage('tool: ' + name);
 }
 
@@ -485,6 +557,16 @@ function fit() {
   const sphere = box.getBoundingSphere(new THREE.Sphere());
   const radius = Math.max(sphere.radius, 1e-3);
   sceneRadius = radius;
+
+  const extent = new THREE.Box3().setFromObject(scene);
+  const lo = worldToModelVector(extent.min);
+  const hi = worldToModelVector(extent.max);
+  modelBounds = {
+    min: { x: Math.min(lo.x, hi.x), y: Math.min(lo.y, hi.y), z: Math.min(lo.z, hi.z) },
+    max: { x: Math.max(lo.x, hi.x), y: Math.max(lo.y, hi.y), z: Math.max(lo.z, hi.z) },
+    span: radius * 2,
+  };
+  section?.setTargets(parts, modelBounds);
   grid?.fitTo(radius);
   // The distance at which the bounding sphere just fits the frame (+8% margin).
   // Framing is defined by the perspective fov even in orthographic, so the two match.
@@ -703,11 +785,12 @@ async function load() {
 
     measure ??= createMeasure({
       scene, view, renderer,
-      readout: (text) => { readoutEl.textContent = text; },
+      readout: (text, heading) => showReadout(text, heading),
     });
     inspect ??= createInspect({
+      onSelect: (id) => tree.select(id),
       scene, view, renderer,
-      readout: (text) => { readoutEl.textContent = text; },
+      readout: (text, heading) => showReadout(text, heading),
     });
     // Only once both tools exist: retarget() feeds them both, and a tool created afterwards
     // would silently never receive its geometry.
@@ -773,6 +856,15 @@ function paletteActions() {
       () => setTool(tool === 'inspect' ? 'none' : 'inspect'));
   add('Tool', tool === 'measure' ? 'Stop measuring' : 'Measure',
       () => setTool(tool === 'measure' ? 'none' : 'measure'));
+  add('Tool', tool === 'section' ? 'Stop the cross section' : 'Cross section',
+      () => setTool(tool === 'section' ? 'none' : 'section'));
+  for (const axis of ['X', 'Y', 'Z']) {
+    list.push({ group: 'Section', title: `Cut along ${axis}`,
+                run: () => { setTool('section'); section.setAxis(axis.toLowerCase()); },
+                enabled: () => true });
+  }
+  list.push({ group: 'Section', title: 'Flip the kept side', run: () => section.flip(),
+              enabled: () => section.stage !== 'off' && section.stage !== 'plane' });
 
   list.push({ group: 'Selection', title: 'Hide selected piece', shortcut: '⌫',
               run: hideSelection, enabled: () => !!inspect?.selection()?.triangles?.length });
@@ -788,6 +880,22 @@ function paletteActions() {
   return list;
 }
 
+let section = createSection({
+  scene, renderer, view,
+  readout: (text) => { readoutEl.textContent = text; },
+});
+
+/// Section keyboard: the plane keeps moving until you switch the tool off.
+window.addEventListener('keydown', (event) => {
+  if (section.stage === 'off' || palette?.isOpen) return;
+  const step = event.shiftKey ? 10 : 1;
+  if (event.key === 'ArrowUp') { section.move(step); event.preventDefault(); }
+  else if (event.key === 'ArrowDown') { section.move(-step); event.preventDefault(); }
+  else if (event.key === 'Tab') { section.flip(); event.preventDefault(); }
+  else if (event.key === 'Escape') { setTool('none'); event.preventDefault(); }
+});
+
+window.section = section;   // for the palette and for tests
 const palette = createPalette({ actions: paletteActions });
 
 window.setHostActions = (ids) => { hostActions = ids ?? []; };
@@ -858,6 +966,12 @@ window.debug = {
   },
 
   components: () => components,
+  section: () => section.debug,
+  // How many of the three materials on each part actually carry the clipping plane — a plane
+  // missed on one of them leaves its edges hanging in the cut.
+  clipCounts: () => parts.map((p) => [p.mesh, p.xray, p.edges]
+    .filter((o) => (o.material.clippingPlanes ?? []).length > 0).length),
+  selectPiece: (id) => { setTool('inspect'); inspect?.selectPiece(id); tree.select(id); },
   hidden: () => [...hiddenIds],
   hide: () => hideSelection(),
   selection: () => inspect?.selection() ?? null,

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { toScreen, cursorPx, buildEdgeList, buildFeatures, featureUnderCursor, axisName, pieceOutline, trianglesInBox, clipToBox, MODEL_TO_WORLD } from './picking.js';
+import { toScreen, cursorPx, buildEdgeList, buildFeatures, featureUnderCursor, axisName, pieceOutline, trianglesTouchingBox, clipToBox, MODEL_TO_WORLD } from './picking.js';
 import { createStroke } from './strokes.js';
 
 /// Inspect: hover highlights what is under the cursor, a click selects it.
@@ -14,7 +14,7 @@ import { createStroke } from './strokes.js';
 ///
 /// A "part" cannot come from the mesh at all: the union has already welded the panels into
 /// one body. Parts come from the CSG components, same as the Parts overlay.
-export function createInspect({ scene, view, renderer, readout }) {
+export function createInspect({ scene, view, renderer, readout, onSelect }) {
 
   const canvas = renderer.domElement;
   const state = { enabled: false, features: [], pieces: [], meshes: [], groups: new Map(), occlude: true };
@@ -285,7 +285,10 @@ export function createInspect({ scene, view, renderer, readout }) {
       const piece = pieceAt(h.point);
       // Its surfaces as well as its outline: holding the modifier should show what would go,
       // not just where its edges run.
-      if (piece) return { type: 'part', piece, mesh: h.object, triangles: trianglesInBox(h.object, piece.source ?? piece) };
+      // Touching, not wholly inside: clipToBox trims them back, and anything that merely
+      // overlaps this piece would otherwise be dropped and leave a gap in the highlight.
+      if (piece) return { type: 'part', piece, mesh: h.object,
+                          triangles: trianglesTouchingBox(h.object, piece.source ?? piece) };
       // No CSG box here. Fall back to the welded solid — but only if it is actually a piece:
       // after the union most of a design is one connected body, and offering "the whole model"
       // as a selection is never what the modifier is for.
@@ -314,34 +317,69 @@ export function createInspect({ scene, view, renderer, readout }) {
              piece: pieceAt(h.point), normal: info.planes[h.faceIndex].normal };
   }
 
+  /// Heading for the details panel: the piece's own name where it has one, its size where it
+  /// does not, and the id beside it — the same pairing the parts list shows, so the two read as
+  /// the same thing.
+  function heading(target) {
+    if (!target) return null;
+    if (target.type === 'part') {
+      const p = target.piece;
+      const [sx, sy, sz] = p.size;
+      return { name: p.source?.name ?? `${mm(sx)} × ${mm(sy)} × ${mm(sz)} mm`, id: p.id ?? null };
+    }
+    if (target.type === 'edge') {
+      return { name: target.feature.type === 'arc' ? 'Arc' : 'Edge', id: null };
+    }
+    return { name: target.type === 'body' ? 'Body' : 'Face', id: null };
+  }
+
+  /// Description as label/value pairs, listed one per line under the heading. A single run-on
+  /// line was fine while there were two numbers; there are now six, and they need scanning
+  /// rather than reading.
   function describe(target) {
-    if (!target) return '';
+    if (!target) return [];
     if (target.type === 'edge') {
       const f = target.feature;
       if (f.type === 'arc') {
         const axis = axisName(f.normal);
-        return `Arc · R ${mm(f.radius)} mm · ${(f.sweep * 180 / Math.PI).toFixed(1)}° · `
-             + `length ${mm(f.length)} mm${axis ? ` · around ${axis}` : ''}`;
+        return [
+          ['Radius', `${mm(f.radius)} mm`],
+          ['Sweep', `${(f.sweep * 180 / Math.PI).toFixed(1)}°`],
+          ['Length', `${mm(f.length)} mm`],
+          ...(axis ? [['Around', axis]] : []),
+        ];
       }
       const axis = axisName(f.b.clone().sub(f.a).normalize());
-      return `Edge · ${mm(f.length)} mm${axis ? ` · along ${axis}` : ''}`;
+      return [['Length', `${mm(f.length)} mm`], ...(axis ? [['Along', axis]] : [])];
     }
     if (target.type === 'part') {
       const p = target.piece;
       const [sx, sy, sz] = p.size;
       const at = p.corner.map((v) => Math.round(v)).join(', ');
-      return `Part #${p.id ?? '?'} · ${mm(sx)} × ${mm(sy)} × ${mm(sz)} mm (w × d × h) · `
-           + `${((sx * sy * sz) / 1e6).toFixed(2)} dm³ · at (${at})`;
+      // The size is in the heading when the piece is named; otherwise it *is* the heading, so
+      // repeating it here would say the same thing twice.
+      return [
+        ...(p.source?.name ? [['Size', `${mm(sx)} × ${mm(sy)} × ${mm(sz)} mm`]] : []),
+        ['Width × depth × height', `${mm(sx)} × ${mm(sy)} × ${mm(sz)} mm`],
+        ['Volume', `${((sx * sy * sz) / 1e6).toFixed(2)} dm³`],
+        ['Corner', at],
+      ];
     }
     if (target.type === 'body') {
       const b = bodyBox(target.mesh, target.triangles);
-      return `Body · ${mm(b.x)} × ${mm(b.y)} × ${mm(b.z)} mm · `
-           + `${target.triangles.length} triangles (no CSG box — extruded shape)`;
+      return [
+        ['Size', `${mm(b.x)} × ${mm(b.y)} × ${mm(b.z)} mm`],
+        ['Triangles', String(target.triangles.length)],
+        ['Note', 'no CSG box — extruded shape'],
+      ];
     }
     const f = faceInfo(target.mesh, target.triangles, target.normal);
     const axis = axisName(target.normal);
-    return `Face · ${mm(f.width)} × ${mm(f.height)} mm · ${(f.area / 100).toFixed(1)} cm²`
-         + `${axis ? ` · facing ${axis}` : ''}`;
+    return [
+      ['Size', `${mm(f.width)} × ${mm(f.height)} mm`],
+      ['Area', `${(f.area / 100).toFixed(1)} cm²`],
+      ...(axis ? [['Facing', axis]] : []),
+    ];
   }
 
   function shortLabel(target) {
@@ -379,10 +417,42 @@ export function createInspect({ scene, view, renderer, readout }) {
     hovered = targetAt(lastPx, modifier);
     show(hovered, hoverLines, hoverFace);
     canvas.style.cursor = hovered ? 'crosshair' : 'default';
-    if (!selected) readout(hovered ? describe(hovered) : hint());
+    if (!selected) readout(hovered ? describe(hovered) : hint(), heading(hovered));
   }
 
   const hint = () => 'Click an edge or a face · hold ⌘ for the whole part';
+
+  /// Selects a piece named from outside — a click in the parts list.
+  ///
+  /// Goes through the same `show` and the same readout as a click in the scene, so a piece
+  /// selected from the list is indistinguishable from one picked with the cursor.
+  function selectPiece(id) {
+    const target = pieceTarget(id);
+    if (!target) return;
+    selected = target;
+    external = null;
+    anchor = show(selected, selectLines, selectFace);
+    label.textContent = shortLabel(selected);
+    label.hidden = false;
+    readout(describe(selected), heading(selected));
+  }
+
+  /// A piece as an inspect target, with the triangles the union welded into some mesh.
+  function pieceTarget(id) {
+    const piece = state.pieces.find((p) => p.id === id);
+    if (!piece) return null;
+    // The mesh that holds most of the piece, not merely the first that grazes it: "touching"
+    // is a loose test, and a neighbouring material brushing the box would otherwise win and
+    // light up a sliver of itself instead of the piece.
+    let best = null;
+    for (const mesh of state.meshes ?? []) {
+      const triangles = trianglesTouchingBox(mesh, piece.source ?? piece);
+      if (!best || triangles.length > best.triangles.length) {
+        best = { type: 'part', piece, mesh, triangles };
+      }
+    }
+    return best?.triangles.length ? best : { type: 'part', piece };
+  }
 
   /// Highlights a piece named from outside — the parts list pointing at a row.
   ///
@@ -395,20 +465,12 @@ export function createInspect({ scene, view, renderer, readout }) {
       refreshHover();
       return;
     }
-    const piece = state.pieces.find((p) => p.id === id);
-    if (!piece) return;
-
-    // The piece owns no triangles of its own — the union welded them — so recover them from
-    // whichever mesh they ended up in.
-    let target = { type: 'part', piece };
-    for (const mesh of state.meshes ?? []) {
-      const triangles = trianglesInBox(mesh, piece.source ?? piece);
-      if (triangles.length) { target = { type: 'part', piece, mesh, triangles }; break; }
-    }
+    const target = pieceTarget(id);
+    if (!target) return;
     external = target;
     hovered = target;
     show(target, hoverLines, hoverFace);
-    if (!selected) readout(describe(target));
+    if (!selected) readout(describe(target), heading(target));
   }
 
   canvas.addEventListener('pointermove', (event) => {
@@ -454,14 +516,17 @@ export function createInspect({ scene, view, renderer, readout }) {
     if (selected) {
       label.textContent = shortLabel(selected);
       label.hidden = false;
-      readout(describe(selected));
+      readout(describe(selected), heading(selected));
     } else {
       label.hidden = true;
       readout(hint());
     }
+    // The parts list follows the scene, so a piece picked here is findable there.
+    onSelect?.(selected?.piece?.id ?? null);
   });
 
   function clear() {
+    if (selected) onSelect?.(null);
     selected = null;
     hovered = null;
     anchor = null;
@@ -558,6 +623,12 @@ export function createInspect({ scene, view, renderer, readout }) {
     drawnHover: hoverLines.segmentCount,
     // Extent of the face actually drawn, not of the triangles it came from: the two differ
     // once the highlight is clipped to a piece, which is the whole point of the clipping.
+    selectedFace: (() => {
+      if (!selectFace.visible) return null;
+      selectFace.geometry.computeBoundingBox();
+      const b = selectFace.geometry.boundingBox;
+      return b ? [b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z].map((n) => Math.round(n)) : null;
+    })(),
     drawnFace: (() => {
       if (!hoverFace.visible) return null;
       hoverFace.geometry.computeBoundingBox();
@@ -584,5 +655,5 @@ export function createInspect({ scene, view, renderer, readout }) {
     centre: [f.centre.x, f.centre.y, f.centre.z].map((v) => Math.round(v)),
   }));
 
-  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, arcPoint, selection, highlightPiece, clear, update };
+  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, arcPoint, selection, highlightPiece, selectPiece, clear, update };
 }
