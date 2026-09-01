@@ -151,29 +151,33 @@ function subtractSpan(spans, s, e) {
   return out;
 }
 
-/// The parts of segment a→b that survive every cutter, as spans of t in [0, 1].
-function surviving(a, b, cutters) {
+/// The parts of segment a→b that survive every cut, as spans of t in [0, 1].
+///
+/// Works in the piece's own coordinates against overlaps already reduced to it, so each bound
+/// is known to be either a pocket wall inside the piece or flush with the piece's surface.
+/// That distinction decides how a segment lying exactly on the bound is treated:
+///
+///   - on a pocket wall it survives — the wall is a real face and the edge along it is real;
+///   - on a flush bound it does not — the cut reaches the piece's surface there, so the
+///     material behind the edge is gone. A groove milled right out to the end of a board used
+///     to leave the board's original top edge drawn across the removed strip.
+function surviving(a, b, overlaps) {
   let spans = [[0, 1]];
-  const p = new THREE.Vector3();
-  const q = new THREE.Vector3();
   const eps = 1e-6;
+  const axes = ['x', 'y', 'z'];
+  const d = b.clone().sub(a);
 
-  for (const cutter of cutters) {
-    p.copy(a).applyMatrix4(cutter.inverse);
-    q.copy(b).applyMatrix4(cutter.inverse);
-    const d = q.clone().sub(p);
-
-    // Slab test: the interval of t for which the segment lies inside the cutter's box.
+  for (const { box, lo, hi } of overlaps) {
     let t0 = 0, t1 = 1;
-    for (const axis of ['x', 'y', 'z']) {
-      // Shrink a hair, so an edge merely touching the cutter's face is not clipped away.
-      const min = cutter.min[axis] + eps;
-      const max = cutter.max[axis] - eps;
+    for (let i = 0; i < 3; i++) {
+      const axis = axes[i];
+      const min = box.min[axis] + (lo[i] ? -eps : eps);
+      const max = box.max[axis] + (hi[i] ? eps : -eps);
       if (Math.abs(d[axis]) < 1e-12) {
-        if (p[axis] < min || p[axis] > max) { t0 = 1; t1 = 0; break; }
+        if (a[axis] < min || a[axis] > max) { t0 = 1; t1 = 0; break; }
       } else {
-        let ta = (min - p[axis]) / d[axis];
-        let tb = (max - p[axis]) / d[axis];
+        let ta = (min - a[axis]) / d[axis];
+        let tb = (max - a[axis]) / d[axis];
         if (ta > tb) { const s = ta; ta = tb; tb = s; }
         t0 = Math.max(t0, ta);
         t1 = Math.min(t1, tb);
@@ -197,6 +201,32 @@ function boxEdges(min, max, matrix) {
     [[0, 0, 0], [0, 0, 1]], [[1, 0, 0], [1, 0, 1]], [[1, 1, 0], [1, 1, 1]], [[0, 1, 0], [0, 1, 1]],
   ]) out.push([at(...f), at(...t)]);
   return out;
+}
+
+/// The outline of an extruded piece: the profile at top and bottom, joined at its corners.
+///
+/// Verticals only where the profile actually turns — a tessellated arc is a smooth surface with
+/// no edges along it, so joining every point would draw a fence around every rounded corner.
+function profileEdges(profile, box) {
+  const turn = 15 * Math.PI / 180;
+  const zLow = box.min.z;
+  const zHigh = box.max.z;
+  const at = (p, z) => new THREE.Vector3(p[0], p[1], z);
+  const edges = [];
+
+  for (let i = 0; i < profile.length; i++) {
+    const a = profile[i];
+    const b = profile[(i + 1) % profile.length];
+    edges.push([at(a, zLow), at(b, zLow)], [at(a, zHigh), at(b, zHigh)]);
+
+    const previous = profile[(i - 1 + profile.length) % profile.length];
+    const incoming = new THREE.Vector2(a[0] - previous[0], a[1] - previous[1]).normalize();
+    const outgoing = new THREE.Vector2(b[0] - a[0], b[1] - a[1]).normalize();
+    if (Math.acos(Math.max(-1, Math.min(1, incoming.dot(outgoing)))) > turn) {
+      edges.push([at(a, zLow), at(a, zHigh)]);
+    }
+  }
+  return edges;
 }
 
 /// Where a cutter overlaps the piece, in the piece's own coordinates.
@@ -270,29 +300,34 @@ function overlapEdges({ box, lo, hi }, matrix) {
 /// between piece and cutter contributes its own edges too.
 export function pieceOutline(component) {
   const box = prepareBox(component);
-  const cutters = (component.cutters ?? []).map(prepareBox);
+  const overlaps = (component.cutters ?? [])
+    .map((c) => overlapInPieceSpace(box, prepareBox(c)))
+    .filter(Boolean);
 
   const points = [];
+  // Edges are built in the piece's coordinates, clipped there, and only then placed in the
+  // world — one transform at the end instead of one per cutter per segment.
   const emit = (segments, against) => {
     for (const [a, b] of segments) {
       for (const [t0, t1] of against.length ? surviving(a, b, against) : [[0, 1]]) {
         if (t1 - t0 < 1e-9) continue;
-        const from = a.clone().lerp(b, t0);
-        const to = a.clone().lerp(b, t1);
+        const from = a.clone().lerp(b, t0).applyMatrix4(box.matrix);
+        const to = a.clone().lerp(b, t1).applyMatrix4(box.matrix);
         points.push(from.x, from.y, from.z, to.x, to.y, to.z);
       }
     }
   };
 
-  // The piece's own edges, with the cut-away spans removed.
-  emit(boxEdges(box.min, box.max, box.matrix), cutters);
+  const identity = new THREE.Matrix4();
 
-  // The edges each cut leaves behind, minus anything a *later* cut removed in turn.
-  cutters.forEach((cutter, index) => {
-    const overlap = overlapInPieceSpace(box, cutter);
-    if (!overlap) return;
-    const others = cutters.filter((_, i) => i !== index);
-    emit(overlapEdges(overlap, box.matrix), others);
+  // The piece's own edges, with the cut-away spans removed. A board with a rounded corner
+  // follows its extruded profile; anything else is a box.
+  emit(component.profile ? profileEdges(component.profile, box) : boxEdges(box.min, box.max, identity),
+       overlaps);
+
+  // The edges each cut leaves behind, minus anything another cut removed in turn.
+  overlaps.forEach((overlap, index) => {
+    emit(overlapEdges(overlap, identity), overlaps.filter((_, i) => i !== index));
   });
 
   return points;

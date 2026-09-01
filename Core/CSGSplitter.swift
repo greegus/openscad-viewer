@@ -114,9 +114,19 @@ extension CSGSplitter {
 
     struct Component {
         var box: Box
+        /// Outline of an extruded piece in the box's own 2D coordinates, when it has one.
+        /// A rounded board is not its bounding box, and drawing the box put square corners
+        /// where the board is round.
+        var profile: [[Double]]?
         /// Boxes removed from this piece by an enclosing `difference()`. The viewer clips the
         /// outline against them, otherwise an edge is drawn straight across a milled groove.
         var cutters: [Box]
+
+        init(box: Box, cutters: [Box], profile: [[Double]]? = nil) {
+            self.box = box
+            self.cutters = cutters
+            self.profile = profile
+        }
     }
 
     /// Recovers the individual pieces the design is built from.
@@ -167,8 +177,8 @@ extension CSGSplitter {
             // A board with a rounded corner is an extruded profile, not a cube. Without this it
             // had no piece at all: the Parts overlay skipped it, and holding the modifier fell
             // through to "the whole connected solid" — which, after the union, is the model.
-            if n.name == "linear_extrude", !removed, let box = extrude(n, current) {
-                result.append(Component(box: box, cutters: cutters))
+            if n.name == "linear_extrude", !removed, let made = extrude(n, current) {
+                result.append(Component(box: made.box, cutters: cutters, profile: made.profile))
                 return                       // its 2D children are a profile, not geometry
             }
 
@@ -209,9 +219,12 @@ extension CSGSplitter {
     private static func merged(_ components: [Component]) -> [Component] {
         let tolerance = 1e-6
 
-        /// Only translation-only boxes can be compared as axis-aligned extents.
+        /// Only plain translation-only boxes can be compared as axis-aligned extents.
+        /// A piece with an outline of its own is not one: merging rebuilds components as bare
+        /// boxes, which would throw the outline away and put square corners back on a rounded
+        /// board.
         func extent(_ c: Component) -> (min: [Double], max: [Double])? {
-            guard c.cutters.isEmpty else { return nil }
+            guard c.cutters.isEmpty, c.profile == nil else { return nil }
             let m = c.box.matrix
             let axisAligned = [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]]
             guard zip(axisAligned, [1.0, 0, 0, 0, 1, 0, 0, 0, 1]).allSatisfy({ abs($0 - $1) < tolerance })
@@ -264,8 +277,8 @@ extension CSGSplitter {
         return rebuilt + passthrough
     }
 
-    /// A `linear_extrude` as a box: the 2D profile's extent, raised to the extrusion height.
-    private static func extrude(_ node: Node, _ transform: [Double]) -> Box? {
+    /// A `linear_extrude` as a box, plus its outline when the profile is a single shape.
+    private static func extrude(_ node: Node, _ transform: [Double]) -> (box: Box, profile: [[Double]]?)? {
         let numbers = named(in: node.args)
         guard let height = numbers["height"], height > 0 else { return nil }
         let centered = node.args.contains("center = true")
@@ -281,9 +294,91 @@ extension CSGSplitter {
                                              0, 1, 0, shape.min[1],
                                              0, 0, 1, centered ? -height / 2 : 0,
                                              0, 0, 0, 1])
-        return Box(matrix: placement,
-                   size: [shape.max[0] - shape.min[0], shape.max[1] - shape.min[1], height],
-                   centered: false)
+        let box = Box(matrix: placement,
+                      size: [shape.max[0] - shape.min[0], shape.max[1] - shape.min[1], height],
+                      centered: false)
+        // Into the box's own coordinates, which is where the viewer builds its edges.
+        let outline = profile(of: node)?.map { [$0[0] - shape.min[0], $0[1] - shape.min[1]] }
+        return (box, outline)
+    }
+
+    /// The extruded outline, in the box's own coordinates, when the profile is a single shape.
+    ///
+    /// Only then: an `intersection` of several 2D shapes has an outline this cannot describe,
+    /// and a wrong outline is worse than falling back to the box.
+    private static func profile(of node: Node) -> [[Double]]? {
+        var found: [[Double]] = []
+        var shapes = 0
+
+        func walk(_ n: Node, _ transform: [Double]) {
+            switch n.name {
+            case "polygon", "square", "circle":
+                shapes += 1
+                let pts = n.name == "polygon" ? points(in: n.args) : []
+                found = pts.map { p in
+                    [transform[0] * p[0] + transform[1] * p[1] + transform[3],
+                     transform[4] * p[0] + transform[5] * p[1] + transform[7]]
+                }
+            case "intersection":
+                // `obrys_zaobleny` clips its rounded outline with a rectangle, so an
+                // intersection usually still has one shape that decides the result and others
+                // that are only guards. If exactly one polygon spans the whole intersection,
+                // that polygon *is* the outline; otherwise there is no single outline to draw.
+                guard let extent = shape2D(n, transform) else { shapes += 2; return }
+                var binding: [[Double]] = []
+                var matches = 0
+                for child in n.children {
+                    guard let box = shape2D(child, transform),
+                          close(box.min[0], extent.min[0]), close(box.min[1], extent.min[1]),
+                          close(box.max[0], extent.max[0]), close(box.max[1], extent.max[1])
+                    else { continue }
+                    var inner: [[Double]] = []
+                    var count = 0
+                    collect(child, transform, &inner, &count)
+                    if count == 1, inner.count >= 3 { binding = inner; matches += 1 }
+                }
+                if matches == 1 { shapes += 1; found = binding } else { shapes += 2 }
+
+            case "difference", "hull":
+                shapes += 2                              // not a single outline; give up
+            default:
+                var current = transform
+                if n.name == "multmatrix", let m = matrix(from: n.args) {
+                    current = multiply(transform, m)
+                }
+                for child in n.children { walk(child, current) }
+            }
+        }
+        for child in node.children { walk(child, identity) }
+
+        return shapes == 1 && found.count >= 3 ? found : nil
+    }
+
+    private static func close(_ a: Double, _ b: Double) -> Bool {
+        abs(a - b) <= max(1.0, abs(a) * 0.01)
+    }
+
+    /// Points of the single polygon under `node`, if that is all there is.
+    private static func collect(_ node: Node, _ transform: [Double],
+                                _ into: inout [[Double]], _ count: inout Int) {
+        switch node.name {
+        case "polygon":
+            count += 1
+            into = points(in: node.args).map { p in
+                [transform[0] * p[0] + transform[1] * p[1] + transform[3],
+                 transform[4] * p[0] + transform[5] * p[1] + transform[7]]
+            }
+        case "square", "circle":
+            count += 1
+        case "intersection", "difference", "hull":
+            count += 2
+        default:
+            var current = transform
+            if node.name == "multmatrix", let m = matrix(from: node.args) {
+                current = multiply(transform, m)
+            }
+            for child in node.children { collect(child, current, &into, &count) }
+        }
     }
 
     /// Extent of a 2D subtree. The dump has already evaluated circles and hulls into polygons,

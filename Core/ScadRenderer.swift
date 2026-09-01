@@ -340,6 +340,7 @@ extension ScadRenderer {
         let pieces = CSGSplitter.components(in: tree).enumerated().map { index, component -> [String: Any] in
             var entry = encode(component.box)
             entry["id"] = index + 1
+            if let profile = component.profile { entry["profile"] = profile }
             if !component.cutters.isEmpty { entry["cutters"] = component.cutters.map(encode) }
             return entry
         }

@@ -176,6 +176,13 @@ never learns which host it is in — that difference used to live inside it.
   - A "face" is not a triangle. The mesh is a triangle soup, so faces are reconstructed once
     per part by welding triangles that share an edge and lie in the same plane — otherwise
     clicking a panel would select half a rectangle.
+  - A rounded board is drawn as its actual **profile**, not as its bounding box: the profile at
+    top and bottom, joined by verticals only where it genuinely turns. A tessellated arc is a
+    smooth surface with no edges along it, so joining every point would fence every rounded
+    corner in. Only when the profile is a single shape — an `intersection` of several has an
+    outline this cannot describe, and a wrong outline is worse than falling back to the box.
+    Note `merged()` must leave these alone: it rebuilds components as bare boxes, which threw
+    the profile away and put the square corners straight back.
   - Boards with a rounded corner are `linear_extrude`, not cubes, and used to have no piece at
     all — the Parts overlay skipped them and holding the modifier fell through to "the whole
     connected solid", which after the union is the entire model. The CSG dump flattens a 2D
