@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { toScreen, cursorPx, buildEdgeList, buildFeatures, featureUnderCursor, axisName, pieceOutline, trianglesTouchingBox, clipToBox, MODEL_TO_WORLD } from './picking.js';
+import { toScreen, cursorPx, pointToSegment2D, buildEdgeList, buildFeatures, featureUnderCursor, axisName, pieceOutline, trianglesTouchingBox, clipToBox, clipFeatureToPiece, MODEL_TO_WORLD } from './picking.js';
 import { createStroke } from './strokes.js';
 
 /// Inspect: hover highlights what is under the cursor, a click selects it.
@@ -104,14 +104,14 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
 
   function setTargets({ parts, components }) {
     state.meshes = parts.map((p) => p.mesh);
-    state.features = buildFeatures(
-      buildEdgeList(parts.map((p) => ({ mesh: p.mesh, edgesGeometry: p.edges.geometry }))));
     state.groups = new Map();
     for (const mesh of state.meshes) {
       mesh.updateMatrixWorld(true);
       state.groups.set(mesh, buildFaceGroups(mesh));
     }
 
+    // Pieces before features: chaining edges into features needs to know where one piece ends,
+    // or a run welded across two boards becomes a single feature spanning both.
     state.pieces = (components ?? []).map((c) => {
       const local = new THREE.Matrix4().set(...c.matrix);
       const world = new THREE.Matrix4().multiplyMatrices(MODEL_TO_WORLD, local);
@@ -132,6 +132,10 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
         box: new THREE.Box3(min, min.clone().add(new THREE.Vector3(sx, sy, sz))),
       };
     });
+
+    state.features = buildFeatures(
+      buildEdgeList(parts.map((p) => ({ mesh: p.mesh, edgesGeometry: p.edges.geometry }))),
+      state.pieces);
     clear();
   }
 
@@ -304,7 +308,12 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     // Only edges you can actually see, unless x-ray is on — there, seeing through is the point.
     const feature = featureUnderCursor(px, state.features, view.camera, canvas, 6,
                                        state.occlude ? state.meshes : null);
-    if (feature) return { type: 'edge', feature };
+    if (feature) {
+      // Limited to the piece the cursor is nearest, for a run welded across several boards.
+      const near = nearestPointOn(feature, px);
+      return { type: 'edge',
+               feature: clipFeatureToPiece(feature, near ? pieceAt(near) : null) };
+    }
 
     const h = hit(px);
     if (!h) return null;
@@ -336,6 +345,23 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
   /// Description as label/value pairs, listed one per line under the heading. A single run-on
   /// line was fine while there were two numbers; there are now six, and they need scanning
   /// rather than reading.
+  /// The point on a feature closest to the cursor, in world space — which piece the edge is
+  /// being asked about depends on where along it you are pointing.
+  function nearestPointOn(feature, px) {
+    let best = null;
+    let bestDistance = Infinity;
+    for (const seg of feature.segments) {
+      const a = toScreen(seg.a, view.camera, canvas);
+      const b = toScreen(seg.b, view.camera, canvas);
+      const { distance, t } = pointToSegment2D(px, a, b);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = seg.a.clone().lerp(seg.b, t);
+      }
+    }
+    return best;
+  }
+
   function describe(target) {
     if (!target) return [];
     if (target.type === 'edge') {
@@ -657,6 +683,35 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     return null;
   };
 
+  /// Every feature the picker can offer, with the extent it covers — for finding the ones that
+  /// run across more than one piece.
+  const features = () => state.features.map((f) => {
+    const box = new THREE.Box3();
+    for (const seg of f.segments) { box.expandByPoint(seg.a); box.expandByPoint(seg.b); }
+    const size = box.getSize(new THREE.Vector3());
+    return {
+      type: f.type,
+      segments: f.segments.length,
+      length: Math.round(f.length ?? 0),
+      extent: [size.x, size.y, size.z].map(Math.round),
+    };
+  });
+
+  /// The longest feature, with a screen position on it — so a test can point at exactly the
+  /// welded run it means to test instead of hunting the grid for any edge at all.
+  const longestFeature = () => {
+    let best = null;
+    for (const f of state.features) {
+      if (!best || (f.length ?? 0) > (best.length ?? 0)) best = f;
+    }
+    if (!best) return null;
+    const seg = best.segments[Math.floor(best.segments.length / 2)];
+    const mid = seg.a.clone().add(seg.b).multiplyScalar(0.5);
+    const px = toScreen(mid, view.camera, canvas);
+    return { length: Math.round(best.length), segments: best.segments.length,
+             px: [Math.round(px.x), Math.round(px.y)] };
+  };
+
   const debug = () => ({
     lastEvent,
     hovered: hovered ? {
@@ -702,5 +757,5 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     centre: [f.centre.x, f.centre.y, f.centre.z].map((v) => Math.round(v)),
   }));
 
-  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, arcPoint, selection, highlightPiece, highlightPieces, selectPiece, clear, update };
+  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, arcPoint, selection, highlightPiece, highlightPieces, selectPiece, features, longestFeature, clear, update };
 }

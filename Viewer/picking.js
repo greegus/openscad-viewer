@@ -520,7 +520,94 @@ function circleThrough(a, b, c) {
 ///
 /// Chains stop wherever a vertex has other edges meeting it (a corner, a T-junction), so
 /// separate edges never merge across a junction.
-export function buildFeatures(edges) {
+/// The part of segment a→b inside a piece's box, as [t0, t1], or null.
+function insideBox(a, b, piece, slack = 0.5) {
+  const p = a.clone().applyMatrix4(piece.inverse);
+  const q = b.clone().applyMatrix4(piece.inverse);
+  const d = q.clone().sub(p);
+  let t0 = 0, t1 = 1;
+
+  for (const axis of ['x', 'y', 'z']) {
+    const min = piece.box.min[axis] - slack;
+    const max = piece.box.max[axis] + slack;
+    if (Math.abs(d[axis]) < 1e-12) {
+      if (p[axis] < min || p[axis] > max) return null;
+    } else {
+      let ta = (min - p[axis]) / d[axis];
+      let tb = (max - p[axis]) / d[axis];
+      if (ta > tb) { const t = ta; ta = tb; tb = t; }
+      t0 = Math.max(t0, ta);
+      t1 = Math.min(t1, tb);
+      if (t0 >= t1) return null;
+    }
+  }
+  return [t0, t1];
+}
+
+/// A feature limited to one piece — but only when it actually runs past it.
+///
+/// CGAL welds coplanar faces, so the front edges of boards flush with one another come out as a
+/// single segment: measured on kniznica.scad, two of them 2020 mm long, spanning the chest panel,
+/// the board between and the cabinet panel. Hovering any of the three lit up all 2020 mm and
+/// reported that as the edge's length.
+///
+/// Returned unchanged when every segment already lies inside the piece, which is the normal case:
+/// trimming otherwise would round arc endpoints and report lengths a hair short for no reason.
+export function clipFeatureToPiece(feature, piece) {
+  if (!piece) return feature;
+
+  // Two different tolerances on purpose. Deciding whether an edge belongs to this piece needs
+  // slack, since mesh vertices do not land exactly on a CSG box. Trimming must not: the slack
+  // would end up in the reported length, and 1220.5 mm for a 1220 mm panel is a wrong number on
+  // screen in a tool whose whole job is dimensions.
+  const loose = feature.segments.map((seg) => insideBox(seg.a, seg.b, piece));
+  const outside = loose.some((span) => !span || span[0] > 1e-6 || span[1] < 1 - 1e-6);
+  if (!outside) return feature;
+
+  const spans = feature.segments.map((seg) => insideBox(seg.a, seg.b, piece, 0));
+  const segments = [];
+  let length = 0;
+  for (const [i, span] of spans.entries()) {
+    if (!span) continue;
+    const { a, b } = feature.segments[i];
+    const from = a.clone().lerp(b, span[0]);
+    const to = a.clone().lerp(b, span[1]);
+    if (from.distanceTo(to) < 1e-6) continue;
+    segments.push({ a: from, b: to });
+    length += from.distanceTo(to);
+  }
+  if (!segments.length) return feature;
+
+  return { ...feature, segments, length, clipped: true,
+           a: segments[0].a, b: segments[segments.length - 1].b };
+}
+
+export function buildFeatures(edges, pieces = []) {
+  /// Which pieces an edge belongs to, as a sorted key.
+  ///
+  /// A chain may only run while this stays the same. CGAL welds coplanar faces, so the front
+  /// edges of two boards flush with each other come out as one continuous run — and a chain that
+  /// does not know where a piece ends becomes a single 2 m feature covering both, which is what
+  /// hovering one board then lit up. An edge shared by two pieces has both in its key, so the
+  /// seam itself stays whole rather than splitting down the middle.
+  const owners = (edge) => {
+    if (!pieces.length) return '';
+    const mid = edge.a.clone().add(edge.b).multiplyScalar(0.5);
+    const v = new THREE.Vector3();
+    const slack = 0.5;
+    const found = [];
+    for (const piece of pieces) {
+      v.copy(mid).applyMatrix4(piece.inverse);
+      if (v.x >= piece.box.min.x - slack && v.x <= piece.box.max.x + slack
+       && v.y >= piece.box.min.y - slack && v.y <= piece.box.max.y + slack
+       && v.z >= piece.box.min.z - slack && v.z <= piece.box.max.z + slack) {
+        found.push(piece.id ?? 0);
+      }
+    }
+    return found.sort((x, y) => x - y).join(',');
+  };
+  const ownerKey = edges.map(owners);
+
   const byVertex = new Map();
   edges.forEach((e, i) => {
     for (const v of [e.a, e.b]) {
@@ -546,6 +633,7 @@ export function buildFeatures(edges) {
         if (incident.length !== 2) break;                    // corner or junction: stop
         const next = incident.find((j) => !used[j]);
         if (next === undefined) break;
+        if (ownerKey[next] !== ownerKey[i]) break;           // a different piece starts here
         used[next] = true;
         const e = edges[next];
         const far = vertexKey(e.a) === k ? e.b : e.a;

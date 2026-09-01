@@ -143,6 +143,30 @@ never learns which host it is in — that difference used to live inside it.
 - **The control row** lives in one `NSStackView`, centred while it fits and clamped to the
   left edge when it does not: the left constraint is required, the right one optional, so a
   row too wide for the panel gives way on the right instead of hiding the mode picker.
+### What counts as an edge
+
+Worth naming, because "edge" means several different things in a CSG model and the viewer treats
+them differently:
+
+| term | what it is | an edge of the solid? |
+|---|---|---|
+| box edge | a 90° crease | yes |
+| CSG edge | the perimeter of a groove or pocket | yes |
+| arc rim | where a rounded side meets a flat face | yes |
+| the rounded surface itself | facets 3.75° apart at `$fn = 96` | **no** — under the 20° threshold |
+| silhouette | the outline you *see* | **no** — it depends on the camera |
+| tangent transition | flat meeting round | yes, but smooth, so not drawn |
+| weld seam | where `union` joined two panels | sometimes absent, sometimes spurious |
+| inner loop | the boundary of a hole, e.g. a handle recess | yes |
+
+The last two columns matter: on a rounded corner there is **no edge along the curve**, only a
+silhouette, so an edge tool has nothing to offer there and that is correct rather than broken.
+
+There are also two independent edge pipelines, which is worth knowing before debugging one:
+`EdgesGeometry(mesh, 20°)` derives creases from the welded mesh and drives the **Edges** overlay
+and everything the inspect tool picks; `pieceOutline(component)` derives outlines from the CSG
+boxes and profiles and drives the **Parts** overlay and a selected piece's outline.
+
 - **Zoom** puts both gestures under one law. A trackpad pinch arrives as a wheel event with
   `ctrlKey` set and a two-finger scroll as one without; they used to be handled differently —
   pinch here, scroll through OrbitControls — and it showed, because OrbitControls takes a fixed

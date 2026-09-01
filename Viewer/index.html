@@ -1001,6 +1001,8 @@ window.debug = {
   },
 
   components: () => components,
+  features: () => inspect?.features() ?? [],
+  longestFeature: () => inspect?.longestFeature() ?? null,
   /// Renders one frame and hands back the pixels. The only way to settle a question about what
   /// is actually drawn rather than what is in the buffers.
   /// Near-white pixels in the rendered frame. The stroke halo is white, so this answers
