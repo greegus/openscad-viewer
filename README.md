@@ -378,6 +378,25 @@ a temp file and renaming it over the original, which replaces the inode and leav
 watch pointing at something nobody will write to again. Events are coalesced and checked against
 the file's mtime, so one save costs one render.
 
+**Naming pieces.** OpenSCAD has no notion of object identity — a module leaves no trace in the
+CSG dump and comments are stripped from it entirely — so names come from the `.scad` text:
+
+```openscad
+// @group Komoda
+    // @name Ľavá bočnica
+    diel("bocnica", [x0, x0 + hr], y, z);
+// @endgroup
+```
+
+Groups nest, and one left open at the end of the file closes there. `@group` covers what lies
+between it and its `@endgroup` in reading order, not a module as a whole. Named pieces are
+matched to geometry **by order** — the dump lists geometry in evaluation order, which is the
+order the markers appear in — so `@name` belongs on a call that produces exactly one piece; past
+that, names would shift. Matching runs before boxes are merged, since merging reorders, and a
+merged piece keeps the first one's name. Where a design provides groups the parts list is built
+from those instead of the CSG's own shape: "Komoda" says more than "Group 2", and it is the
+structure the author meant rather than the one the evaluator happened to produce.
+
 **Parts list.** Every piece in the model, on the left, grouped the way the design was written,
 with a visibility toggle on each piece *and* each group; groups start expanded and the panel
 folds away by its header. OpenSCAD exports no names — a module leaves no trace in the CSG dump —

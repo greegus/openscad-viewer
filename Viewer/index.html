@@ -144,7 +144,10 @@ const tree = createTree({
   container: treeEl,
   onToggle: setHidden,
   isHidden: (id) => hiddenIds.has(id),
-  label: (piece) => `#${piece.id} · ` + piece.size.map((v) => +v.toFixed(1)).join(' × ') + ' mm',
+  // The design's own name if it has one, the dimensions otherwise — those at least identify
+  // a piece, which a bare number does not.
+  label: (piece) => piece.name
+    ?? `#${piece.id} · ` + piece.size.map((v) => +v.toFixed(1)).join(' × ') + ' mm',
   // Hovering a row shows the piece in the scene. Only the first of a group: highlighting a
   // dozen at once needs machinery the inspect tool does not have, and the point is to find
   // where a row *is*, which one piece answers.

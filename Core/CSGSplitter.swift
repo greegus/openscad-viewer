@@ -140,6 +140,10 @@ extension CSGSplitter {
         /// written as.
         var path: [Int] = []
 
+        /// Name from a `// @name` comment, and the `// @group` names enclosing it.
+        var name: String?
+        var groups: [String] = []
+
         init(box: Box, cutters: [Box], profile: [[Double]]? = nil, path: [Int] = []) {
             self.box = box
             self.cutters = cutters
@@ -168,7 +172,28 @@ extension CSGSplitter {
     ///
     /// `linear_extrude` is measured rather than skipped: the CSG dump flattens its 2D shape
     /// into explicit polygons, so the outline can simply be read off — see `shape2D`.
+    /// Pieces, optionally carrying the names their source gives them.
+    ///
+    /// Names are matched by order, and applied *before* merging, which reorders. The CSG dump
+    /// lists geometry in evaluation order — the order the markers appear in — so this holds
+    /// while each marked call produces exactly one piece. Anything past the last marker keeps
+    /// its number rather than borrowing a name it has no claim to.
+    static func components(in node: Node, source: String) -> [Component] {
+        var pieces = unmerged(in: node)
+        for (index, marker) in Annotations.markers(in: source).enumerated() where index < pieces.count {
+            pieces[index].name = marker.name
+            pieces[index].groups = marker.groups
+        }
+        return merged(pieces)
+    }
+
     static func components(in node: Node) -> [Component] {
+        merged(unmerged(in: node))
+    }
+
+    /// The pieces as the tree gives them, still in evaluation order — which is what name
+    /// matching relies on, and what merging then destroys.
+    private static func unmerged(in node: Node) -> [Component] {
         var result: [Component] = []
 
         /// Every box under a node, used to collect the cutting tools of a difference.
@@ -233,7 +258,7 @@ extension CSGSplitter {
         }
 
         walk(node, identity, cutters: [], removed: false, path: [])
-        return merged(result)
+        return result
     }
 
     /// Boxes that a `union` welded into one piece must be drawn as one outline.
@@ -266,10 +291,10 @@ extension CSGSplitter {
             return (low, (0..<3).map { low[$0] + c.box.size[$0] })
         }
 
-        var boxes: [(min: [Double], max: [Double], path: [Int])] = []
+        var boxes: [(min: [Double], max: [Double], source: Component)] = []
         var passthrough: [Component] = []
         for c in components {
-            if let e = extent(c) { boxes.append((e.min, e.max, c.path)) } else { passthrough.append(c) }
+            if let e = extent(c) { boxes.append((e.min, e.max, c)) } else { passthrough.append(c) }
         }
 
         /// Only pieces written side by side in the same place may be folded together.
@@ -291,17 +316,18 @@ extension CSGSplitter {
                     let matching = (0..<3).filter {
                         abs(a.min[$0] - b.min[$0]) < tolerance && abs(a.max[$0] - b.max[$0]) < tolerance
                     }
-                    guard siblings(a.path, b.path),
+                    guard siblings(a.source.path, b.source.path),
                           matching.count == 2,
                           let axis = (0..<3).first(where: { !matching.contains($0) }),
                           a.max[axis] >= b.min[axis] - tolerance,
                           b.max[axis] >= a.min[axis] - tolerance
                     else { continue }
 
+                    // Keeps the first piece's identity — path, and any name it was given — so a
+                    // third sibling still compares equal and the name is not lost.
                     boxes[i] = (min: (0..<3).map { min(a.min[$0], b.min[$0]) },
                                 max: (0..<3).map { max(a.max[$0], b.max[$0]) },
-                                // Keeps the first path, so a third sibling still compares equal.
-                                path: a.path)
+                                source: a.source)
                     boxes.remove(at: j)
                     changed = true
                     break outer
@@ -315,8 +341,11 @@ extension CSGSplitter {
                                     0, 1, 0, box.min[1],
                                     0, 0, 1, box.min[2],
                                     0, 0, 0, 1]
-            return Component(box: Box(matrix: matrix, size: size, centered: false), cutters: [],
-                             path: box.path)
+            var piece = Component(box: Box(matrix: matrix, size: size, centered: false), cutters: [],
+                                  path: box.source.path)
+            piece.name = box.source.name
+            piece.groups = box.source.groups
+            return piece
         }
         return rebuilt + passthrough
     }

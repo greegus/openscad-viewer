@@ -23,12 +23,18 @@ export function createTree({ container, onToggle, isHidden, label, onHover }) {
   function build(components) {
     const root = { key: '', children: new Map(), pieces: [] };
 
+    // Named groups win over the CSG's shape when the design provides them: "Komoda" says more
+    // than "Group 2", and it is the structure the author meant rather than the one the
+    // evaluator happened to produce.
+    const named = components.some((c) => c.groups?.length);
+
     for (const component of components) {
       let node = root;
-      for (const step of component.path ?? []) {
+      const steps = named ? (component.groups ?? []) : (component.path ?? []);
+      for (const step of steps) {
         const key = node.key ? `${node.key}.${step}` : String(step);
         if (!node.children.has(key)) {
-          node.children.set(key, { key, children: new Map(), pieces: [] });
+          node.children.set(key, { key, label: named ? step : null, children: new Map(), pieces: [] });
         }
         node = node.children.get(key);
       }
@@ -94,7 +100,7 @@ export function createTree({ container, onToggle, isHidden, label, onHover }) {
     row.className = 'tree-row is-group';
     row.style.paddingLeft = `${6 + depth * 12}px`;
     row.innerHTML = `<button class="tree-caret">${isCollapsed ? '▸' : '▾'}</button>
-                     <span class="tree-name">Group ${index} · ${own.length}</span>
+                     <span class="tree-name">${node.label ?? `Group ${index}`} · ${own.length}</span>
                      <button class="tree-eye"></button>`;
     // Pointing at a group lights up everything under it, which is how you find out what a
     // group actually is — the names are ours, not the design's.

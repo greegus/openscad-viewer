@@ -343,11 +343,16 @@ extension ScadRenderer {
         // OpenSCAD keeps no object identity — the CSG dump has only geometry and operator
         // nodes, no module names — so the id is ours: the index after merging, which is
         // deterministic for a given design.
-        let pieces = CSGSplitter.components(in: tree).enumerated().map { index, component -> [String: Any] in
+        // The design's own names, if it carries any: read from the .scad, since comments do not
+        // survive into the CSG dump. Falls back to the id when a piece has none.
+        let scad = (try? String(contentsOf: input, encoding: .utf8)) ?? ""
+        let pieces = CSGSplitter.components(in: tree, source: scad).enumerated().map { index, component -> [String: Any] in
             var entry = encode(component.box)
             entry["id"] = index + 1
             if let profile = component.profile { entry["profile"] = profile }
             entry["path"] = component.path
+            if let name = component.name { entry["name"] = name }
+            if !component.groups.isEmpty { entry["groups"] = component.groups }
             if !component.cutters.isEmpty { entry["cutters"] = component.cutters.map(encode) }
             return entry
         }
