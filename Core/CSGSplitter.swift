@@ -351,51 +351,102 @@ extension CSGSplitter {
     /// Only then: an `intersection` of several 2D shapes has an outline this cannot describe,
     /// and a wrong outline is worse than falling back to the box.
     private static func profile(of node: Node) -> [[Double]]? {
-        var found: [[Double]] = []
+        var found: [[Double]]?
         var shapes = 0
+        for child in node.children {
+            guard let points = outline(of: child, identity) else { shapes += 2; continue }
+            shapes += 1
+            found = points
+        }
+        return shapes == 1 && (found?.count ?? 0) >= 3 ? found : nil
+    }
 
-        func walk(_ n: Node, _ transform: [Double]) {
-            switch n.name {
-            case "polygon", "square", "circle":
-                shapes += 1
-                let pts = n.name == "polygon" ? points(in: n.args) : []
-                found = pts.map { p in
-                    [transform[0] * p[0] + transform[1] * p[1] + transform[3],
-                     transform[4] * p[0] + transform[5] * p[1] + transform[7]]
-                }
-            case "intersection":
-                // `obrys_zaobleny` clips its rounded outline with a rectangle, so an
-                // intersection usually still has one shape that decides the result and others
-                // that are only guards. If exactly one polygon spans the whole intersection,
-                // that polygon *is* the outline; otherwise there is no single outline to draw.
-                guard let extent = shape2D(n, transform) else { shapes += 2; return }
-                var binding: [[Double]] = []
-                var matches = 0
-                for child in n.children {
-                    guard let box = shape2D(child, transform),
-                          close(box.min[0], extent.min[0]), close(box.min[1], extent.min[1]),
-                          close(box.max[0], extent.max[0]), close(box.max[1], extent.max[1])
-                    else { continue }
-                    var inner: [[Double]] = []
-                    var count = 0
-                    collect(child, transform, &inner, &count)
-                    if count == 1, inner.count >= 3 { binding = inner; matches += 1 }
-                }
-                if matches == 1 { shapes += 1; found = binding } else { shapes += 2 }
+    /// The outline of a 2D subtree as points, or nil when it is not a single shape.
+    ///
+    /// `hull` has to be built here rather than read off: the dump flattens some 2D shapes to an
+    /// explicit `polygon` but keeps a hull symbolic, with its circles and squares intact — which
+    /// is exactly how the rounded shelves are written, so they had no outline at all and were
+    /// drawn as their bounding box.
+    private static func outline(of node: Node, _ transform: [Double]) -> [[Double]]? {
+        var current = transform
+        if node.name == "multmatrix", let m = matrix(from: node.args) {
+            current = multiply(transform, m)
+        }
 
-            case "difference", "hull":
-                shapes += 2                              // not a single outline; give up
-            default:
-                var current = transform
-                if n.name == "multmatrix", let m = matrix(from: n.args) {
-                    current = multiply(transform, m)
-                }
-                for child in n.children { walk(child, current) }
+        func place(_ pts: [[Double]]) -> [[Double]] {
+            pts.map { p in
+                [current[0] * p[0] + current[1] * p[1] + current[3],
+                 current[4] * p[0] + current[5] * p[1] + current[7]]
             }
         }
-        for child in node.children { walk(child, identity) }
 
-        return shapes == 1 && found.count >= 3 ? found : nil
+        switch node.name {
+        case "polygon":
+            let pts = points(in: node.args)
+            return pts.count >= 3 ? place(pts) : nil
+
+        case "square":
+            guard let (sx, sy) = sizePair(node.args) ?? named(in: node.args)["size"].map({ ($0, $0) }),
+                  sx > 0, sy > 0 else { return nil }
+            let low = node.args.contains("center = true") ? [-sx / 2, -sy / 2] : [0, 0]
+            return place([low, [low[0] + sx, low[1]], [low[0] + sx, low[1] + sy], [low[0], low[1] + sy]])
+
+        case "circle":
+            guard let r = named(in: node.args)["r"], r > 0 else { return nil }
+            // Same vertex count OpenSCAD used, so the outline sits on the mesh rather than
+            // just near it.
+            let sides = Int(named(in: node.args)["$fn"] ?? 0)
+            let n = sides >= 3 ? sides : 32
+            return place((0..<n).map { i in
+                let a = 2 * Double.pi * Double(i) / Double(n)
+                return [r * cos(a), r * sin(a)]
+            })
+
+        case "hull":
+            var all: [[Double]] = []
+            for child in node.children {
+                guard let pts = outline(of: child, current) else { return nil }
+                all += pts
+            }
+            return all.count >= 3 ? convexHull(all) : nil
+
+        case "offset":
+            // The delta is ignored: in practice it is zero here, and insetting a polygon
+            // properly is a different job from reading its shape.
+            guard node.children.count == 1 else { return nil }
+            return outline(of: node.children[0], current)
+
+        // multmatrix belongs here too: it is a wrapper like the rest, and leaving it out sent
+        // every transformed shape — every circle inside a hull — to the default nil.
+        case "group", "union", "render", "color", "multmatrix":
+            let shapes = node.children.compactMap { outline(of: $0, current) }
+            return node.children.count == 1 ? shapes.first : (shapes.count == 1 ? shapes[0] : nil)
+
+        default:
+            return nil          // intersection, difference: no single outline to draw
+        }
+    }
+
+    /// Andrew's monotone chain, counter-clockwise.
+    private static func convexHull(_ points: [[Double]]) -> [[Double]] {
+        let sorted = points.sorted { $0[0] == $1[0] ? $0[1] < $1[1] : $0[0] < $1[0] }
+        guard sorted.count >= 3 else { return sorted }
+
+        func cross(_ o: [Double], _ a: [Double], _ b: [Double]) -> Double {
+            (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+        }
+        func chain(_ pts: [[Double]]) -> [[Double]] {
+            var out: [[Double]] = []
+            for p in pts {
+                while out.count >= 2, cross(out[out.count - 2], out[out.count - 1], p) <= 0 {
+                    out.removeLast()
+                }
+                out.append(p)
+            }
+            out.removeLast()
+            return out
+        }
+        return chain(sorted) + chain(sorted.reversed())
     }
 
     private static func close(_ a: Double, _ b: Double) -> Bool {

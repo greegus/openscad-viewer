@@ -5,7 +5,15 @@
 /// tree survives, and each piece knows the path it sits on. Chains with nothing to choose
 /// between are folded away, so a group in this list is a place where the design actually
 /// branched rather than every anonymous wrapper between here and the root.
-export function createTree({ container, onToggle, isHidden, label }) {
+/// Eye and eye-with-a-slash, inline so the list needs no icon font and no network.
+const EYE = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+  stroke-width="1.3"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z"/>
+  <circle cx="8" cy="8" r="1.9"/></svg>`;
+const EYE_OFF = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+  stroke-width="1.3"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z"/>
+  <circle cx="8" cy="8" r="1.9"/><path d="M2.5 13.5 13.5 2.5"/></svg>`;
+
+export function createTree({ container, onToggle, isHidden, label, onHover }) {
 
   let roots = [];
   const collapsed = new Set();          // group keys the user folded shut
@@ -47,6 +55,9 @@ export function createTree({ container, onToggle, isHidden, label }) {
     node.pieces.concat([...node.children.values()].flatMap(pieces));
 
   function render() {
+    // The list is rebuilt on every change, which would otherwise jump back to the top each time
+    // a piece is switched off — exactly when you are working partway down a long list.
+    const scroll = container.querySelector('.tree-body')?.scrollTop ?? 0;
     container.textContent = '';
 
     const header = document.createElement('button');
@@ -64,6 +75,7 @@ export function createTree({ container, onToggle, isHidden, label }) {
 
     let group = 0;
     for (const node of roots) renderGroup(node, body, 0, () => ++group);
+    body.scrollTop = scroll;
   }
 
   function renderGroup(node, into, depth, nextIndex) {
@@ -84,13 +96,16 @@ export function createTree({ container, onToggle, isHidden, label }) {
     row.innerHTML = `<button class="tree-caret">${isCollapsed ? '▸' : '▾'}</button>
                      <span class="tree-name">Group ${index} · ${own.length}</span>
                      <button class="tree-eye"></button>`;
+    // Pointing at a group lights up everything under it, which is how you find out what a
+    // group actually is — the names are ours, not the design's.
+    hoverable(row, own.map((p) => p.id));
     row.querySelector('.tree-caret').addEventListener('click', () => {
       if (isCollapsed) collapsed.delete(node.key); else collapsed.add(node.key);
       render();
     });
 
     const eye = row.querySelector('.tree-eye');
-    eye.textContent = hiddenCount === own.length ? '􀋯' : '􀋮';
+    eye.innerHTML = hiddenCount === own.length ? EYE_OFF : EYE;
     eye.classList.toggle('is-off', hiddenCount === own.length);
     eye.title = hiddenCount === own.length ? 'Show all in group' : 'Hide all in group';
     // Partly hidden reads as "on", so one click takes the whole group away — the reverse
@@ -105,6 +120,14 @@ export function createTree({ container, onToggle, isHidden, label }) {
     for (const child of node.children.values()) renderGroup(child, into, depth + 1, nextIndex);
   }
 
+  /// Shows the piece in the scene while the pointer is on its row, and hands the highlight
+  /// back on the way out — clearing it outright would blank a piece the cursor is really over.
+  function hoverable(row, ids) {
+    if (!onHover) return;
+    row.addEventListener('mouseenter', () => onHover(ids));
+    row.addEventListener('mouseleave', () => onHover(null));
+  }
+
   function renderPiece(piece, into, depth) {
     const off = isHidden(piece.id);
     const row = document.createElement('div');
@@ -114,10 +137,11 @@ export function createTree({ container, onToggle, isHidden, label }) {
     row.querySelector('.tree-name').textContent = label(piece);
 
     const eye = row.querySelector('.tree-eye');
-    eye.textContent = off ? '􀋯' : '􀋮';
+    eye.innerHTML = off ? EYE_OFF : EYE;
     eye.classList.toggle('is-off', off);
     eye.title = off ? 'Show' : 'Hide';
     eye.addEventListener('click', () => onToggle([piece.id], off));
+    hoverable(row, [piece.id]);
     into.appendChild(row);
   }
 

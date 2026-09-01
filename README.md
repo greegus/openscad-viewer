@@ -386,6 +386,11 @@ groups by that. Chains with nothing to choose between are folded away: the dump 
 nodes, nearly all anonymous wrappers, and without folding you would click through a dozen levels
 before reaching a piece. Measured on kniznica.scad: 88 rows, 25 groups, 63 pieces.
 
+Hovering a row lights the piece up in the scene, through the same drawing path a real hover
+takes, so the two cannot drift apart in how a piece is shown. Leaving a row hands the highlight
+back to the cursor rather than clearing it, or stepping off the list would blank a piece the
+pointer is genuinely over.
+
 Note the piece paths also fixed something else — merging only folds *siblings* now. Collinear
 boxes were merged on geometry alone, which would swallow two genuinely separate boards that
 happen to line up, and geometry cannot tell those apart.

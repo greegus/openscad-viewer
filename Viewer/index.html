@@ -94,7 +94,10 @@
   /* Always present, so a row does not shift when the pointer arrives. */
   .tree-eye {
     appearance: none; border: 0; background: transparent; cursor: pointer;
-    padding: 0 2px; font-size: 12px; color: rgba(255, 255, 255, 0.75); opacity: 0;
+    display: flex; align-items: center; padding: 0;
+    /* Clear of the scrollbar, so reaching for it does not switch a piece off. */
+    margin-right: 10px;
+    color: rgba(255, 255, 255, 0.75); opacity: 0;
   }
   .tree-row:hover .tree-eye, .tree-eye.is-off { opacity: 1; }
   .tree-eye.is-off { color: rgba(255, 255, 255, 0.4); }
@@ -142,6 +145,10 @@ const tree = createTree({
   onToggle: setHidden,
   isHidden: (id) => hiddenIds.has(id),
   label: (piece) => `#${piece.id} · ` + piece.size.map((v) => +v.toFixed(1)).join(' × ') + ' mm',
+  // Hovering a row shows the piece in the scene. Only the first of a group: highlighting a
+  // dozen at once needs machinery the inspect tool does not have, and the point is to find
+  // where a row *is*, which one piece answers.
+  onHover: (ids) => inspect?.highlightPiece(ids ? ids[0] : null),
 });
 const dark = matchMedia('(prefers-color-scheme: dark)').matches;
 

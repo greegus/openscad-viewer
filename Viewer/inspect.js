@@ -370,8 +370,11 @@ export function createInspect({ scene, view, renderer, readout }) {
   let hovered = null;
   let lastPx = null;
   let modifier = false;
+  let external = null;         // piece highlighted from the parts list
 
   function refreshHover() {
+    // A piece pointed at from the parts list wins: the cursor is over the list, not the model.
+    if (external) return;
     if (!state.enabled || !lastPx) return;
     hovered = targetAt(lastPx, modifier);
     show(hovered, hoverLines, hoverFace);
@@ -380,6 +383,33 @@ export function createInspect({ scene, view, renderer, readout }) {
   }
 
   const hint = () => 'Click an edge or a face · hold ⌘ for the whole part';
+
+  /// Highlights a piece named from outside — the parts list pointing at a row.
+  ///
+  /// Goes through the same `show` as a real hover, so the two can never drift apart in how a
+  /// piece is drawn. `null` hands the highlight back to the cursor rather than just clearing
+  /// it, or leaving the list would blank a piece the pointer is genuinely over.
+  function highlightPiece(id) {
+    if (id === null || id === undefined) {
+      external = null;
+      refreshHover();
+      return;
+    }
+    const piece = state.pieces.find((p) => p.id === id);
+    if (!piece) return;
+
+    // The piece owns no triangles of its own — the union welded them — so recover them from
+    // whichever mesh they ended up in.
+    let target = { type: 'part', piece };
+    for (const mesh of state.meshes ?? []) {
+      const triangles = trianglesInBox(mesh, piece.source ?? piece);
+      if (triangles.length) { target = { type: 'part', piece, mesh, triangles }; break; }
+    }
+    external = target;
+    hovered = target;
+    show(target, hoverLines, hoverFace);
+    if (!selected) readout(describe(target));
+  }
 
   canvas.addEventListener('pointermove', (event) => {
     lastPx = cursorPx(event, canvas);
@@ -554,5 +584,5 @@ export function createInspect({ scene, view, renderer, readout }) {
     centre: [f.centre.x, f.centre.y, f.centre.z].map((v) => Math.round(v)),
   }));
 
-  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, arcPoint, selection, clear, update };
+  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, arcPoint, selection, highlightPiece, clear, update };
 }
