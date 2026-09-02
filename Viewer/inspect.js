@@ -394,8 +394,9 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
       const at = p.corner.map((v) => Math.round(v)).join(', ');
       // The size is in the heading when the piece is named; otherwise it *is* the heading, so
       // repeating it here would say the same thing twice.
+      // Once only. The heading carries the piece's name when it has one and its size when it
+      // does not, so adding a size row on top of this one printed the same numbers twice.
       return [
-        ...(p.source?.name ? [['Size', `${mm(sx)} × ${mm(sy)} × ${mm(sz)} mm`]] : []),
         ['Width × depth × height', `${mm(sx)} × ${mm(sy)} × ${mm(sz)} mm`],
         ['Volume', `${((sx * sy * sz) / 1e6).toFixed(2)} dm³`],
         ['Corner', at],
