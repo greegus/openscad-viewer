@@ -21,7 +21,7 @@ echo "Tests/polyhedron.scad"
 out=$(Tests/probe.sh Tests/polyhedron.scad Tests/probes/polyhedron.js) || { echo "  probe failed: $out"; exit 1; }
 expect "names in order"  "$(echo "$out" | field "['names']")" '["Cube", "Wedge", "Ball", "Second cube"]'
 expect "wedge"           "$(echo "$out" | field "['wedge']")" '{"claimed": "8/8", "edges": 9, "faces": 5}'
-expect "ball bounds only" "$(echo "$out" | field "['ballBoundsOnly']")" "true"
+expect "ball"            "$(echo "$out" | field "['ball']")" '{"claimed": "2300/2300", "faces": ["sphere:2300/r20"], "silhouetteRadius": 20, "silhouetteSegments": 96, "staticEdges": 0}'
 
 if [ $# -ge 1 ]; then
   echo "$1"

@@ -152,7 +152,7 @@ import { STLLoader } from './vendor/STLLoader.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { createMeasure } from './measure.js';
 import { createInspect } from './inspect.js';
-import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
+import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, sphereSilhouette, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
 import { updateStrokeResolution } from './strokes.js';
 import { createGrid } from './grid.js';
 import { createPalette } from './palette.js';
@@ -678,6 +678,33 @@ function buildEdgeOverlay(pieces) {
   edgeLines.visible = edgesOn;
   scene.add(edgeLines);
   section?.setOverlay(edgeLines);
+  silhouetteCameraKey = '';
+}
+
+/// Silhouettes of the spheres, redrawn whenever the camera has moved: a sphere has no edge to
+/// put in the overlay above, and what a drawing shows of one is the circle where the view
+/// grazes it.
+let silhouetteLines = null;
+let silhouetteCameraKey = '';
+function updateSilhouettes() {
+  const spheres = pieceModel.filter((p) => p.sphere);
+  if (!spheres.length) {
+    if (silhouetteLines) { scene.remove(silhouetteLines); silhouetteLines.geometry.dispose(); silhouetteLines = null; }
+    return;
+  }
+  const key = view.camera.matrixWorld.elements.join(',') + view.camera.zoom + (view.camera.isPerspectiveCamera ? 'p' : 'o');
+  if (key === silhouetteCameraKey && silhouetteLines) { silhouetteLines.visible = edgesOn; return; }
+  silhouetteCameraKey = key;
+  const points = [];
+  for (const piece of spheres) for (const p of sphereSilhouette(piece, view.camera)) points.push(p.x, p.y, p.z);
+  if (!silhouetteLines) {
+    silhouetteLines = new THREE.LineSegments(new THREE.BufferGeometry(), edgeMaterial());
+    scene.add(silhouetteLines);
+  }
+  silhouetteLines.geometry.dispose();
+  silhouetteLines.geometry = new THREE.BufferGeometry();
+  silhouetteLines.geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+  silhouetteLines.visible = edgesOn;
 }
 
 // --- hiding ---
@@ -844,6 +871,7 @@ async function load() {
 
 function tick() {
   controls.update();
+  updateSilhouettes();
   measure?.update();
   inspect?.update();
   renderer.render(scene, view.camera);
@@ -1052,6 +1080,14 @@ window.debug = {
     return out;
   },
   pieceCoverage: () => inspect?.pieceCoverage() ?? null,
+  /// A sphere's silhouette as currently drawn: segment count and the radius of the ring.
+  silhouette: (id) => {
+    const piece = pieceModel.find((p) => p.id === id);
+    if (!piece?.sphere) return null;
+    const pts = sphereSilhouette(piece, view.camera);
+    const c = pts.reduce((acc, p) => acc.add(p), new THREE.Vector3()).divideScalar(pts.length || 1);
+    return { segments: pts.length / 2, radius: pts.length ? +pts[0].distanceTo(c).toFixed(2) : 0 };
+  },
   claimedBy: (id, match) => {
     const piece = pieceModel.find((p) => p.id === id);
     if (!piece) return null;

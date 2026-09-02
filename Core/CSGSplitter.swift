@@ -129,6 +129,10 @@ extension CSGSplitter {
         var faces: [[Double]]?
         var edges: [[Double]]?
 
+        /// A sphere's radius, when the solid is one: a single spherical face with no edges of its
+        /// own, drawn by its silhouette.
+        var sphere: Double?
+
         init(matrix: [Double], size: [Double], centered: Bool, approximate: Bool = false,
              profile: [[Double]]? = nil) {
             self.matrix = matrix
@@ -329,7 +333,7 @@ extension CSGSplitter {
         /// board.
         func extent(_ c: Component) -> (min: [Double], max: [Double])? {
             // Nor is a bounds-only piece: rebuilding it as a box would drop the flag that says so.
-            guard c.cutters.isEmpty, c.profile == nil, !c.box.approximate, c.box.faces == nil else { return nil }
+            guard c.cutters.isEmpty, c.profile == nil, !c.box.approximate, c.box.faces == nil, c.box.sphere == nil else { return nil }
             let m = c.box.matrix
             let axisAligned = [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]]
             guard zip(axisAligned, [1.0, 0, 0, 0, 1, 0, 0, 0, 1]).allSatisfy({ abs($0 - $1) < tolerance })
@@ -892,7 +896,10 @@ extension CSGSplitter {
             }
         case "sphere":
             guard let r = named(in: node.args)["r"], r > 0 else { return nil }
-            lo = [-r, -r, -r]; hi = [r, r, r]
+            var box = Box(matrix: multiply(transform, [1, 0, 0, -r, 0, 1, 0, -r, 0, 0, 1, -r, 0, 0, 0, 1]),
+                          size: [2 * r, 2 * r, 2 * r], centered: false)
+            box.sphere = r
+            return box
         case "rotate_extrude":
             // The profile sweeps round z: its x extent is the radius, its y extent the height.
             var shape: (min: [Double], max: [Double])?

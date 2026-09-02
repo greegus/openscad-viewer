@@ -155,7 +155,7 @@ export function buildPieceModel(components) {
 
     const origin = [c.matrix[3], c.matrix[7], c.matrix[11]];
     return {
-      id: c.id, name: c.name, groups: c.groups ?? [], source: c,
+      id: c.id, name: c.name, groups: c.groups ?? [], source: c, sphere: c.sphere ?? null,
       size: c.size, world, inverse: world.clone().invert(), outline,
       corner: c.centered ? origin.map((v, i) => v - c.size[i] / 2) : origin,
       box: new THREE.Box3(min, min.clone().add(new THREE.Vector3(sx, sy, sz))),
@@ -198,8 +198,13 @@ export function pieceFaces(piece) {
     axis: axis.clone().transformDirection(toWorld).normalize(),
     piece,
   });
+  const sphere = (centre, radius, label) => faces.push({
+    kind: 'sphere', label, radius, inward: false,
+    point: centre.clone().applyMatrix4(toWorld),
+    piece,
+  });
 
-  addSurfaces(source, piece.box, plane, cylinder, '');
+  addSurfaces(source, piece.box, plane, cylinder, '', sphere);
 
   // A cut that only touches a face splits it. Where two cylinders each graze the same wall the
   // wall has zero thickness at their crossing, and a B-rep kernel reports that by dividing the
@@ -325,8 +330,16 @@ function profileRuns(points) {
 }
 
 /// The surfaces of one primitive — a box, or a profile extruded along z.
-function addSurfaces(source, box, plane, cylinder, prefix) {
+function addSurfaces(source, box, plane, cylinder, prefix, sphere = null) {
   const { min, max } = box;
+
+  // A sphere is one face and nothing else — no edge anywhere on it. What is drawn is its
+  // silhouette, which depends on the camera and so is not a face's business (see
+  // `sphereSilhouette`).
+  if (source.sphere && sphere) {
+    sphere(new THREE.Vector3((min.x + max.x) / 2, (min.y + max.y) / 2, (min.z + max.z) / 2), source.sphere, prefix + 'surface');
+    return;
+  }
 
   // A polyhedron states its own faces; they are the piece's faces, not the box's.
   if (source.faces) {
@@ -382,6 +395,45 @@ function addSurfaces(source, box, plane, cylinder, prefix) {
   }
 }
 
+/// The silhouette of a sphere piece as seen by `camera`, as segment endpoints in world space.
+///
+/// A sphere has no edges, so what a drawing shows of one is the circle where the view grazes it
+/// — Fusion draws exactly this. From a point at distance d the grazing circle is not the great
+/// circle but a smaller one, radius r·√(d² − r²)/d, pushed r²/d toward the eye; an orthographic
+/// view sees the great circle perpendicular to its direction. Recomputed as the camera moves.
+export function sphereSilhouette(piece, camera, segments = 96) {
+  const box = piece.box;
+  const centre = new THREE.Vector3((box.min.x + box.max.x) / 2, (box.min.y + box.max.y) / 2,
+                                   (box.min.z + box.max.z) / 2).applyMatrix4(piece.world);
+  const r = piece.sphere;
+  let normal, ringCentre, ringRadius;
+  if (camera.isPerspectiveCamera) {
+    const toEye = camera.position.clone().sub(centre);
+    const d = toEye.length();
+    if (d <= r) return [];
+    normal = toEye.divideScalar(d);
+    ringCentre = centre.clone().addScaledVector(normal, r * r / d);
+    ringRadius = r * Math.sqrt(d * d - r * r) / d;
+  } else {
+    normal = camera.getWorldDirection(new THREE.Vector3()).negate();
+    ringCentre = centre;
+    ringRadius = r;
+  }
+  const u = new THREE.Vector3(1, 0, 0);
+  if (Math.abs(u.dot(normal)) > 0.9) u.set(0, 1, 0);
+  u.cross(normal).normalize();
+  const v = normal.clone().cross(u).normalize();
+  const out = [];
+  let prev = null;
+  for (let i = 0; i <= segments; i++) {
+    const a = 2 * Math.PI * i / segments;
+    const p = ringCentre.clone().addScaledVector(u, ringRadius * Math.cos(a)).addScaledVector(v, ringRadius * Math.sin(a));
+    if (prev) out.push(prev, p);
+    prev = p;
+  }
+  return out;
+}
+
 /// Circle through three points in 2D, or null when they are in a line.
 function circleThrough2D(a, b, c) {
   const d = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
@@ -428,7 +480,8 @@ export function assignTriangles(mesh, faces, candidates = null) {
   // its normal. With planes tested first, the facets along that tangent were claimed by the wall
   // — two tangent lines crossing on one face drew a star of wall-coloured strips through the
   // middle of the cut. The more specific surface has to win.
-  const ordered = [...faces].sort((a, b) => (a.kind === 'cylinder' ? -1 : 0) - (b.kind === 'cylinder' ? -1 : 0));
+  const curved = (f) => (f.kind === 'plane' ? 0 : -1);
+  const ordered = [...faces].sort((a, b) => curved(a) - curved(b));
 
   const local = new THREE.Vector3();
   const slack = 0.5;
@@ -466,6 +519,12 @@ export function assignTriangles(mesh, faces, candidates = null) {
           // Signed: a neighbour flush against this face shares the plane with the opposite normal.
           if (normal.dot(face.normal) * sign < 0.995) { fits = false; break; }
           if (Math.abs(offset.copy(p).sub(face.point).dot(face.normal)) > 0.02) { fits = false; break; }
+        } else if (face.kind === 'sphere') {
+          // Every vertex at the radius, facing outward — OpenSCAD's sphere vertices lie exactly
+          // on it, so the tolerance is for arithmetic only.
+          offset.copy(p).sub(face.point);
+          if (Math.abs(offset.length() - face.radius) > Math.max(0.05, face.radius * 0.002)) { fits = false; break; }
+          if (normal.dot(offset.normalize()) * sign < 0.5) { fits = false; break; }
         } else {
           if (Math.abs(normal.dot(face.axis)) > 0.05) { fits = false; break; }
           offset.copy(p).sub(face.point);
@@ -914,6 +973,7 @@ export function pieceOutline(component) {
 
   // The piece's own edges, with the cut-away spans removed. A board with a rounded corner
   // follows its extruded profile; anything else is a box.
+  if (component.sphere) return [];       // no edge anywhere on a sphere; its silhouette is drawn per frame
   emit(component.edges ? component.edges.map(([ax, ay, az, bx, by, bz]) =>
          [new THREE.Vector3(box.min.x + ax, box.min.y + ay, box.min.z + az),
           new THREE.Vector3(box.min.x + bx, box.min.y + by, box.min.z + bz)])

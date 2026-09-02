@@ -354,6 +354,7 @@ extension ScadRenderer {
             if let profile = b.profile { box["profile"] = profile }
             if let faces = b.faces { box["faces"] = faces }
             if let edges = b.edges { box["edges"] = edges }
+            if let sphere = b.sphere { box["sphere"] = sphere }
             return box
         }
         // OpenSCAD keeps no object identity — the CSG dump has only geometry and operator

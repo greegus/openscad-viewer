@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { toScreen, cursorPx, pointToSegment2D, pieceFeatures, featureUnderCursor,
+import { toScreen, cursorPx, pointToSegment2D, pieceFeatures, featureUnderCursor, sphereSilhouette,
          axisName, pieceFaces, assignTriangles, trianglesTouchingBox, trianglesInBox, clipToBox,
          MODEL_TO_WORLD } from './picking.js';
 import { createStroke } from './strokes.js';
@@ -280,6 +280,17 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
   let fills = true;
   const setFills = (on) => { fills = on; if (!on) { hoverFace.visible = false; selectFace.visible = false; } };
 
+  /// The outline a whole piece is drawn with. A sphere has no outline, only a silhouette, which
+  /// follows the camera — `update` redraws it every frame it is highlighted.
+  function pieceStrokePoints(piece) {
+    if (piece.sphere) return sphereSilhouette(piece, view.camera);
+    const points = [];
+    for (let i = 0; i < piece.outline.length; i += 3) {
+      points.push(new THREE.Vector3(piece.outline[i], piece.outline[i + 1], piece.outline[i + 2]));
+    }
+    return points;
+  }
+
   function show(target, lines, face) {
     lines.visible = false;
     face.visible = false;
@@ -293,12 +304,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
       return mid.a.clone().add(mid.b).multiplyScalar(0.5);
     }
     if (target.type === 'part') {
-      const points = [];
-      for (let i = 0; i < target.piece.outline.length; i += 3) {
-        points.push(new THREE.Vector3(target.piece.outline[i], target.piece.outline[i + 1],
-                                      target.piece.outline[i + 2]));
-      }
-      lines.setPoints(points);
+      lines.setPoints(pieceStrokePoints(target.piece));
       const groups = target.groups ?? (target.triangles?.length ? [{ mesh: target.mesh, triangles: target.triangles }] : []);
       if (groups.length) {
         // Every material the piece has triangles in, clipped to the piece and merged into one fill.
@@ -390,8 +396,9 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
       return { name: kind, id: null };
     }
     if (target.type === 'body') return { name: 'Body', id: null };
-    const round = target.face?.kind === 'cylinder';
-    return { name: round ? 'Round face' : 'Face', id: target.face?.piece?.id ?? null };
+    const kind = target.face?.kind;
+    const name = kind === 'cylinder' ? 'Round face' : kind === 'sphere' ? 'Spherical face' : 'Face';
+    return { name, id: target.face?.piece?.id ?? null };
   }
 
   /// Description as label/value pairs, listed one per line under the heading. A single run-on
@@ -439,6 +446,13 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
         ['Size', `${mm(b.x)} × ${mm(b.y)} × ${mm(b.z)} mm`],
         ['Triangles', String(target.triangles.length)],
         ['Note', 'no CSG box — extruded shape'],
+      ];
+    }
+    if (target.face?.kind === 'sphere') {
+      return [
+        ['Surface', 'spherical'],
+        ['Radius', `${mm(target.face.radius)} mm`],
+        ['Triangles', String(target.triangles.length)],
       ];
     }
     if (target.face?.kind === 'cylinder') {
@@ -674,7 +688,15 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
   }
 
   /// The label lives in the DOM, so it has to follow the view.camera.
+  let cameraKey = '';
   function update() {
+    // A highlighted sphere's silhouette moves with the camera.
+    const key = view.camera.matrixWorld.elements.join(',') + view.camera.zoom;
+    if (key !== cameraKey) {
+      cameraKey = key;
+      if (hovered?.type === 'part' && hovered.piece.sphere && hoverLines.visible) hoverLines.setPoints(pieceStrokePoints(hovered.piece));
+      if (selected?.type === 'part' && selected.piece.sphere && selectLines.visible) selectLines.setPoints(pieceStrokePoints(selected.piece));
+    }
     if (!state.enabled || label.hidden || !anchor) return;
     const p = toScreen(anchor, view.camera, canvas);
     label.style.left = `${p.x}px`;
