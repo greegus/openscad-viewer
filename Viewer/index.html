@@ -1017,6 +1017,20 @@ window.debug = {
   features: () => inspect?.features() ?? [],
   /// The CSG faces of a piece and how much of the mesh each one covers — for checking that
   /// identity comes from the CSG and the mesh only supplies pixels.
+  /// Each plane face's dividers and the sub-faces they produce, with triangle counts.
+  dividersOf: (id) => {
+    const piece = pieceModel.find((p) => p.id === id);
+    if (!piece) return null;
+    const faces = pieceFaces(piece);
+    const groups = assignTriangles(parts[0].mesh, faces, null);
+    return faces.filter((f) => f.kind === 'plane' && f.tag).map((f) => ({
+      wall: f.tag.axis + '=' + Math.round(f.tag.at),
+      dividers: f.dividers.length,
+      across: f.dividers.map((d) => [d.across.x, d.across.y, d.across.z].map((v) => +v.toFixed(2))),
+      parts: [...groups.entries()].filter(([g]) => g.parent === f).map(([g, t]) => g.region + ':' + t.length),
+      own: groups.get(f)?.length ?? 0,
+    }));
+  },
   facesOf: (id) => {
     const piece = pieceModel.find((p) => p.id === id);
     if (!piece) return null;

@@ -295,7 +295,18 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
     exactly the triangles Delete removes — so you see what will go before it goes. A welded
     piece has no triangles of its own, so they are recovered by centroid containment in its box
     and cached per piece, or a hover would redo the scan every frame.
-  - **Two cuts meeting each other** get their intersection curve. Two cylinders drilled through a
+  - **A cut that only touches a face** is an edge, and it splits the face. A cylinder of radius half
+  the side drilled through a cube is tangent to every wall it runs between, and along that line
+  the material behind the wall is cut down to nothing; where two such lines cross, the wall has
+  zero thickness — which cannot be made. A B-rep kernel treats the tangent as an edge regardless
+  of angle, because two faces meet there, and divides the wall into the regions the tangents
+  bound. Fusion does exactly this, and now so does the viewer: on `Tests/cylinder.scad` the two
+  walls grazed by both cylinders split into four quadrants, the four walls each cylinder passes
+  through split in two along the other's tangent. The same tangent is *not* drawn where a
+  board's rounded corner meets its straight side — that is intended design, not a warning.
+  The viewer's job is to show the model as it would exist in the real world, and a point of zero
+  thickness is the kind of thing a joiner needs to see.
+- **Two cuts meeting each other** get their intersection curve. Two cylinders drilled through a
   cube meet along a curve which is a crease of the result, belonging to neither cut's rim nor to
   the piece — it belongs to the pair. Worth noting that the old mesh-crease reader found this one
   for free, and taking edges from the CSG means it has to be reconstructed deliberately. It is

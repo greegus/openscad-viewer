@@ -180,11 +180,12 @@ export function pieceFaces(piece) {
   const source = piece.source ?? {};
   const toWorld = piece.world;
 
-  const plane = (p0, n, label) => faces.push({
-    kind: 'plane', label,
+  const plane = (p0, n, label, tag = null) => faces.push({
+    kind: 'plane', label, tag,
     point: p0.clone().applyMatrix4(toWorld),
     normal: n.clone().transformDirection(toWorld).normalize(),
     piece,
+    dividers: [],       // tangent lines lying in this face, which split it — see below
   });
   const cylinder = (p0, axis, radius, label) => faces.push({
     kind: 'cylinder', label, radius,
@@ -194,6 +195,32 @@ export function pieceFaces(piece) {
   });
 
   addSurfaces(source, piece.box, plane, cylinder, '');
+
+  // A cut that only touches a face splits it. Where two cylinders each graze the same wall the
+  // wall has zero thickness at their crossing, and a B-rep kernel reports that by dividing the
+  // wall into the quadrants the two tangents bound — Fusion does exactly this. The tangents are
+  // recorded on the face as dividers, and triangle assignment then keeps each region apart.
+  if (!source.profile) {
+    for (const cut of source.cutters ?? []) {
+      const box = prepareBox(cut);
+      if (!cut.profile) continue;
+      const cutToPiece = new THREE.Matrix4()
+        .multiplyMatrices(piece.inverse, MODEL_TO_WORLD)
+        .multiply(box.matrix);
+      const tangents = tangentEdges({ profile: cut.profile, min: box.min, max: box.max,
+                                      toPiece: cutToPiece }, piece.box);
+      for (const [a, b] of tangents) {
+        // Which face holds this line: the one whose plane both ends lie in.
+        const face = faces.find((f) => f.tag
+          && Math.abs(a[f.tag.axis] - f.tag.at) < 0.05 && Math.abs(b[f.tag.axis] - f.tag.at) < 0.05);
+        if (!face) continue;
+        const from = a.clone().applyMatrix4(toWorld);
+        const dir = b.clone().applyMatrix4(toWorld).sub(from).normalize();
+        // Side is judged across the line within the plane: normal × direction.
+        face.dividers.push({ point: from, across: new THREE.Vector3().crossVectors(face.normal, dir).normalize() });
+      }
+    }
+  }
 
   // Every cut adds the surface it leaves behind, in the piece's coordinates.
   for (const cut of source.cutters ?? []) {
@@ -218,12 +245,12 @@ function addSurfaces(source, box, plane, cylinder, prefix) {
   const { min, max } = box;
 
   if (!source.profile) {
-    plane(new THREE.Vector3(min.x, 0, 0), new THREE.Vector3(-1, 0, 0), prefix + 'face');
-    plane(new THREE.Vector3(max.x, 0, 0), new THREE.Vector3(1, 0, 0), prefix + 'face');
-    plane(new THREE.Vector3(0, min.y, 0), new THREE.Vector3(0, -1, 0), prefix + 'face');
-    plane(new THREE.Vector3(0, max.y, 0), new THREE.Vector3(0, 1, 0), prefix + 'face');
-    plane(new THREE.Vector3(0, 0, min.z), new THREE.Vector3(0, 0, -1), prefix + 'face');
-    plane(new THREE.Vector3(0, 0, max.z), new THREE.Vector3(0, 0, 1), prefix + 'face');
+    plane(new THREE.Vector3(min.x, 0, 0), new THREE.Vector3(-1, 0, 0), prefix + 'face', { axis: 'x', at: min.x });
+    plane(new THREE.Vector3(max.x, 0, 0), new THREE.Vector3(1, 0, 0), prefix + 'face', { axis: 'x', at: max.x });
+    plane(new THREE.Vector3(0, min.y, 0), new THREE.Vector3(0, -1, 0), prefix + 'face', { axis: 'y', at: min.y });
+    plane(new THREE.Vector3(0, max.y, 0), new THREE.Vector3(0, 1, 0), prefix + 'face', { axis: 'y', at: max.y });
+    plane(new THREE.Vector3(0, 0, min.z), new THREE.Vector3(0, 0, -1), prefix + 'face', { axis: 'z', at: min.z });
+    plane(new THREE.Vector3(0, 0, max.z), new THREE.Vector3(0, 0, 1), prefix + 'face', { axis: 'z', at: max.z });
     return;
   }
 
@@ -288,7 +315,22 @@ function circleThrough2D(a, b, c) {
 /// neighbour.
 export function assignTriangles(mesh, faces, candidates = null) {
   const position = mesh.geometry.attributes.position;
-  const groups = new Map(faces.map((f) => [f, []]));
+  const groups = new Map(faces.filter((f) => !f.dividers?.length).map((f) => [f, []]));
+  // A divided face yields one sub-face per region its dividers cut it into, created as regions
+  // turn up. Each carries its parent, so a readout can still say which wall it is part of.
+  const regions = new Map();
+  const regionFace = (face, key) => {
+    const id = face.label + '#' + key;
+    let bucket = regions.get(face);
+    if (!bucket) { bucket = new Map(); regions.set(face, bucket); }
+    let sub = bucket.get(id);
+    if (!sub) {
+      sub = { ...face, dividers: [], parent: face, region: key, label: face.label + ' (part)' };
+      bucket.set(id, sub);
+      groups.set(sub, []);
+    }
+    return sub;
+  };
   // Only the triangles near this piece, when the caller knows which those are: matching every
   // triangle against every face in the design is millions of tests at load time.
   const indices = candidates ?? Array.from({ length: position.count / 3 }, (_, i) => i);
@@ -328,7 +370,13 @@ export function assignTriangles(mesh, faces, candidates = null) {
         }
       }
       if (!fits) continue;
-      groups.get(face).push(t);
+      if (face.dividers?.length) {
+        const key = face.dividers
+          .map((d) => (offset.copy(centroid).sub(d.point).dot(d.across) >= 0 ? '+' : '-')).join('');
+        groups.get(regionFace(face, key)).push(t);
+      } else {
+        groups.get(face).push(t);
+      }
       break;
     }
   }
@@ -770,6 +818,18 @@ export function pieceOutline(component) {
     }
   });
 
+  // Where a cut only touches a face: the tangent is an edge in its own right, and a warning.
+  // A box piece only, for now — its faces are the six planes of the box.
+  // Clipped against the *other* cuts, never against its own: the tangent lies on that cut's own
+  // surface and would be taken for inside. On a wall that another cut passes through, the
+  // tangent then runs from the wall's edge to the rim of the hole and stops — as Fusion draws
+  // it — rather than across the empty hole.
+  if (!component.profile) {
+    cutters.forEach((cutter, index) => {
+      emit(tangentEdges(cutter, box), cutters.filter((_, i) => i !== index));
+    });
+  }
+
   // And where two cuts meet each other. Each pair once, and clipped against neither of them:
   // the curve lies on both surfaces, so either would clip it away entirely.
   for (let i = 0; i < cutters.length; i++) {
@@ -793,6 +853,69 @@ function boxEdges(min, max, matrix) {
     [[0, 0, 0], [0, 0, 1]], [[1, 0, 0], [1, 0, 1]], [[1, 1, 0], [1, 1, 1]], [[0, 1, 0], [0, 1, 1]],
   ]) out.push([at(...f), at(...t)]);
   return out;
+}
+
+/// Where a shaped cut merely touches a face of the piece, without passing through it.
+///
+/// A cylinder of radius half the side drilled through a cube is tangent to every wall it runs
+/// between. Along that line the material behind the wall is cut down to nothing, and at the point
+/// where two such lines cross the wall has zero thickness — which cannot be made. A B-rep kernel
+/// treats the tangent as an edge regardless: two faces meet there, the wall and the cylinder,
+/// and an edge is the boundary between faces, not a crease. Fusion goes on to split the wall into
+/// the four quadrants those edges bound, so the pinch is visible as topology.
+///
+/// This is deliberately *not* done for the blend where a rounded corner of a board meets its
+/// straight side. That tangent is intended design and drawing it would fence in every rounded
+/// corner; this one is a warning.
+///
+/// A tangent shows up as a profile vertex whose whole ruling lies in one of the piece's faces.
+function tangentEdges(cutter, box) {
+  if (!cutter.profile) return [];
+  const eps = 0.02;
+  const edges = [];
+
+  const planes = [
+    { axis: 'x', at: box.min.x }, { axis: 'x', at: box.max.x },
+    { axis: 'y', at: box.min.y }, { axis: 'y', at: box.max.y },
+    { axis: 'z', at: box.min.z }, { axis: 'z', at: box.max.z },
+  ];
+
+  for (const [px, py] of cutter.profile) {
+    const a = new THREE.Vector3(px, py, cutter.min.z).applyMatrix4(cutter.toPiece);
+    const b = new THREE.Vector3(px, py, cutter.max.z).applyMatrix4(cutter.toPiece);
+
+    for (const plane of planes) {
+      if (Math.abs(a[plane.axis] - plane.at) > eps || Math.abs(b[plane.axis] - plane.at) > eps) continue;
+      // The ruling lies in this face. Keep the part within the face's own extent.
+      const span = clipToBoxSpan(a, b, box, eps);
+      if (!span) continue;
+      const from = a.clone().lerp(b, span[0]);
+      const to = a.clone().lerp(b, span[1]);
+      if (from.distanceTo(to) > 1e-6) edges.push([from, to]);
+    }
+  }
+  return edges;
+}
+
+/// The part of a→b inside an axis-aligned box in the same space, as [t0, t1] or null.
+function clipToBoxSpan(a, b, box, slack) {
+  const d = b.clone().sub(a);
+  let t0 = 0, t1 = 1;
+  for (const axis of ['x', 'y', 'z']) {
+    const min = box.min[axis] - slack;
+    const max = box.max[axis] + slack;
+    if (Math.abs(d[axis]) < 1e-12) {
+      if (a[axis] < min || a[axis] > max) return null;
+    } else {
+      let ta = (min - a[axis]) / d[axis];
+      let tb = (max - a[axis]) / d[axis];
+      if (ta > tb) { const t = ta; ta = tb; tb = t; }
+      t0 = Math.max(t0, ta);
+      t1 = Math.min(t1, tb);
+      if (t0 >= t1) return null;
+    }
+  }
+  return [t0, t1];
 }
 
 /// Where two shaped cuts meet each other inside the piece.
