@@ -69,6 +69,7 @@ enum ScadRenderer {
         for dep in dependencies(of: url) {
             raw += stamp(for: dep)
         }
+        raw += stamp(for: manifestURL(for: url))      // names change without the design changing
         raw += "|\(options.size)|\(options.camera)|\(options.colorscheme)|\(format)"
         return SHA256.hash(data: Data(raw.utf8)).map { String(format: "%02x", $0) }.joined()
     }
@@ -354,12 +355,16 @@ extension ScadRenderer {
             return box
         }
         // OpenSCAD keeps no object identity — the CSG dump has only geometry and operator
-        // nodes, no module names — so the id is ours: the index after merging, which is
-        // deterministic for a given design.
+        // nodes, no module names — so the id is ours: the index in tree order after merging,
+        // which is the order the design writes its pieces in and changes only when the design does.
         // The design's own names, if it carries any. Comments do not survive into the CSG dump,
         // so they come from the .scad text; a piece with none keeps its id.
-        let pieces = CSGSplitter.components(in: tree, source: scad, values: values)
-            .enumerated().map { index, component -> [String: Any] in
+        // The design may ship a manifest of its pieces (`dielce.json`, written by its own
+        // annotation checker); that is the authority when present, since it has already
+        // expanded every loop, and the comments are the fallback for a design without one.
+        let named = manifestNames(for: input).map { CSGSplitter.components(in: tree, names: $0) }
+            ?? CSGSplitter.components(in: tree, source: scad, values: values)
+        let pieces = named.enumerated().map { index, component -> [String: Any] in
             var entry = encode(component.box)
             entry["id"] = index + 1
             if let profile = component.profile { entry["profile"] = profile }
@@ -413,6 +418,28 @@ extension ScadRenderer {
     @discardableResult
     /// A copy of the design that also echoes each expression, so one run yields both the tree
     /// and the numbers. `include` rather than `use`: only `include` brings the variables in.
+    /// `dielce.json` beside the design, if it describes this design: one entry per piece in
+    /// render order, with group and name. A convention of the design, not of OpenSCAD — the
+    /// design's header says the viewer should read the manifest rather than the comments.
+    static func manifestURL(for input: URL) -> URL {
+        input.deletingLastPathComponent().appendingPathComponent("dielce.json")
+    }
+
+    private static func manifestNames(for input: URL) -> [(name: String, groups: [String])]? {
+        guard let data = try? Data(contentsOf: manifestURL(for: input)),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let source = json["source"] as? String,
+              source == input.lastPathComponent,
+              let parts = json["parts"] as? [[String: Any]], !parts.isEmpty
+        else { return nil }
+        let ordered = parts.sorted { ($0["index"] as? Int ?? 0) < ($1["index"] as? Int ?? 0) }
+        return ordered.map { part in
+            let name = (part["name"] as? String) ?? (part["part"] as? String) ?? ""
+            let group = (part["group"] as? String) ?? ""
+            return (name, group.isEmpty ? [] : [group])
+        }
+    }
+
     private static func withEchoes(of input: URL, _ expressions: [String], in work: URL) -> URL {
         var text = "include <\(input.path)>;\n"
         for (index, expression) in expressions.enumerated() {

@@ -187,10 +187,16 @@ extension CSGSplitter {
     /// while each marked call produces exactly one piece. Anything past the last marker keeps
     /// its number rather than borrowing a name it has no claim to.
     static func components(in node: Node, source: String, values: [String: Int] = [:]) -> [Component] {
+        components(in: node, names: Annotations.expand(source, values: values).map { ($0.name, $0.groups) })
+    }
+
+    /// Pieces named from a list in evaluation order — the design's own manifest, or its comments
+    /// expanded into one.
+    static func components(in node: Node, names: [(name: String, groups: [String])]) -> [Component] {
         var pieces = unmerged(in: node)
-        for (index, marker) in Annotations.expand(source, values: values).enumerated() where index < pieces.count {
-            pieces[index].name = marker.name
-            pieces[index].groups = marker.groups
+        for (index, entry) in names.enumerated() where index < pieces.count {
+            pieces[index].name = entry.name
+            pieces[index].groups = entry.groups
         }
         return merged(pieces)
     }
@@ -373,7 +379,10 @@ extension CSGSplitter {
             piece.groups = box.source.groups
             return piece
         }
-        return rebuilt + passthrough
+        // In the order the design wrote them, which is the tree's order. Appending the pieces
+        // that could not be merged after the ones that could put every rounded board after
+        // every plain one, so a board's id changed whenever the reader learnt its outline.
+        return (rebuilt + passthrough).sorted { $0.path.lexicographicallyPrecedes($1.path) }
     }
 
     /// A `linear_extrude` as a box, plus its outline when the profile is a single shape.

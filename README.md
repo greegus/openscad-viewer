@@ -534,7 +534,13 @@ would hang out of the cut, and it comes *off* all of them when the tool stops, o
 stays cut and reads as missing geometry.
 
 **Naming pieces.** OpenSCAD has no notion of object identity — a module leaves no trace in the
-CSG dump and comments are stripped from it entirely — so names come from the `.scad` text:
+CSG dump and comments are stripped from it entirely — so names come from the design itself, in
+one of two ways. If a `dielce.json` lies beside the `.scad` and names it as its `source`, that
+manifest is the authority: one entry per piece in render order, with `group` and `name`, written
+by the design's own annotation checker, which has already expanded every loop. Its stamp is part
+of the cache key, so renaming a piece re-renders. Ids are the pieces' order in the CSG tree
+after merging — the order the design writes them in — and change only when the design does. Without a manifest, names come from the
+`.scad` comments:
 
 ```openscad
 // @group Komoda
