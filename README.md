@@ -295,7 +295,13 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
     exactly the triangles Delete removes — so you see what will go before it goes. A welded
     piece has no triangles of its own, so they are recovered by centroid containment in its box
     and cached per piece, or a hover would redo the scan every frame.
-  - **Tessellated arcs read as one edge.** A rounded corner reaches the mesh as a run of
+  - **A rim reads as one circle.** Two rims crossing on a face divide each other — four edges meet
+  at the crossing, so chaining stops there, which is topologically right — but the halves are
+  still one circle, and selecting the rim of a hole should give the rim. Arcs sharing a centre, a
+  radius and a plane and meeting end to end are joined; the test is strict, so two distinct
+  circles that merely touch stay apart. `Tests/cylinder.scad`: eight arcs of 46 segments became
+  four circles of 96 with a sweep of 360°.
+- **Tessellated arcs read as one edge.** A rounded corner reaches the mesh as a run of
     short chords — the mesh has no idea it was ever a circle. `buildFeatures` walks the edge
     chains (stopping at any vertex where other edges meet, so nothing merges across a
     junction), splits each chain into straight and constant-turn runs, and fits a circle to

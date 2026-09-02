@@ -992,8 +992,12 @@ export function buildFeatures(edges) {
     let cursor = 0;
     for (const run of runs) {
       if (!run.curved) continue;
-      const from = run.a + 1;
-      const to = run.b + 1;
+      // A run at either end of the chain reaches the chain's own end point: there is no straight
+      // stretch there for the circle fit to be protected from. Without this, an entirely curved
+      // chain shed its first and last segment as one-segment "lines" — a circle came out as an
+      // arc plus two stray stubs, and clicking the rim of a hole picked a stub.
+      const from = run.a === 0 ? 0 : run.a + 1;
+      const to = run.b === turns.length - 1 ? points.length - 1 : run.b + 1;
       if (from > cursor) features.push(makeFeature(points.slice(cursor, from + 1), false));
       features.push(makeFeature(points.slice(from, to + 1), true));
       cursor = to;
@@ -1001,7 +1005,51 @@ export function buildFeatures(edges) {
     if (cursor < points.length - 1) features.push(makeFeature(points.slice(cursor), false));
   }
 
-  return features.filter(Boolean);
+  return mergeCircles(features.filter(Boolean));
+}
+
+/// Joins arcs of one and the same circle that meet end to end.
+///
+/// Two rims crossing on a face genuinely divide each other, so chaining is right to stop where
+/// four edges meet — but the two halves are still one circle, and selecting the rim of a hole
+/// should give the rim rather than half of it. Only arcs sharing a centre, a radius and a plane
+/// are joined, so two distinct circles that happen to touch stay apart.
+function mergeCircles(features) {
+  const arcs = features.filter((f) => f.type === 'arc' && f.centre && f.radius);
+  if (arcs.length < 2) return features;
+
+  const ends = (f) => [f.segments[0].a, f.segments[f.segments.length - 1].b];
+  const touching = (a, b) => ends(a).some((p) => ends(b).some((q) => p.distanceTo(q) < 0.05));
+  const coCircular = (a, b) =>
+    Math.abs(a.radius - b.radius) < 0.05
+    && a.centre.distanceTo(b.centre) < 0.05
+    && (!a.normal || !b.normal || Math.abs(a.normal.dot(b.normal)) > 0.999);
+
+  const used = new Set();
+  const groups = [];
+  for (const arc of arcs) {
+    if (used.has(arc)) continue;
+    const group = [arc];
+    used.add(arc);
+    for (;;) {
+      const next = arcs.find((other) => !used.has(other) && coCircular(arc, other)
+                                     && group.some((g) => touching(g, other)));
+      if (!next) break;
+      used.add(next);
+      group.push(next);
+    }
+    if (group.length > 1) groups.push(group);
+  }
+  if (!groups.length) return features;
+
+  const joined = groups.map((group) => ({
+    ...group[0],
+    segments: group.flatMap((g) => g.segments),
+    length: group.reduce((n, g) => n + (g.length ?? 0), 0),
+    sweep: Math.min(group.reduce((n, g) => n + (g.sweep ?? 0), 0), 2 * Math.PI),
+  }));
+  const consumed = new Set(groups.flat());
+  return features.filter((f) => !consumed.has(f)).concat(joined);
 }
 
 function makeFeature(points, curved) {
