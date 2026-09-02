@@ -352,6 +352,8 @@ extension ScadRenderer {
             var box: [String: Any] = ["matrix": b.matrix, "size": b.size, "centered": b.centered,
                                       "approximate": b.approximate]
             if let profile = b.profile { box["profile"] = profile }
+            if let faces = b.faces { box["faces"] = faces }
+            if let edges = b.edges { box["edges"] = edges }
             return box
         }
         // OpenSCAD keeps no object identity — the CSG dump has only geometry and operator

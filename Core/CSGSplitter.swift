@@ -122,6 +122,13 @@ extension CSGSplitter {
         /// shape's edges, so nothing may be drawn from them.
         var approximate = false
 
+        /// An explicit boundary, when the solid states one — a polyhedron. Faces as
+        /// `[px, py, pz, nx, ny, nz]` and edges as `[ax, ay, az, bx, by, bz]`, in the box's own
+        /// coordinates. With these the box is only a bound, and the viewer builds the piece's
+        /// faces and edges from them rather than from the box.
+        var faces: [[Double]]?
+        var edges: [[Double]]?
+
         init(matrix: [Double], size: [Double], centered: Bool, approximate: Bool = false,
              profile: [[Double]]? = nil) {
             self.matrix = matrix
@@ -240,6 +247,7 @@ extension CSGSplitter {
                 out.append(box)
                 return
             }
+            if let box = bounded(n, current) { out.append(box); return }
             for child in n.children { collectBoxes(child, current, into: &out) }
         }
 
@@ -266,6 +274,15 @@ extension CSGSplitter {
                 result.append(Component(box: made.box, cutters: cutters, profile: made.profile,
                                         path: path))
                 return                       // its 2D children are a profile, not geometry
+            }
+
+            // Solids the reader has no outline for — a polyhedron, a sphere, a revolved profile —
+            // are still pieces. Bounded and flagged approximate rather than dropped: a dropped
+            // piece is invisible to the list and to picking, and, worse, shifts every name after
+            // it by one, since names are matched to geometry by order.
+            if !removed, let box = bounded(n, current) {
+                result.append(Component(box: box, cutters: cutters, path: path))
+                return
             }
 
             if n.name == "difference", let first = n.children.first {
@@ -311,7 +328,8 @@ extension CSGSplitter {
         /// boxes, which would throw the outline away and put square corners back on a rounded
         /// board.
         func extent(_ c: Component) -> (min: [Double], max: [Double])? {
-            guard c.cutters.isEmpty, c.profile == nil else { return nil }
+            // Nor is a bounds-only piece: rebuilding it as a box would drop the flag that says so.
+            guard c.cutters.isEmpty, c.profile == nil, !c.box.approximate, c.box.faces == nil else { return nil }
             let m = c.box.matrix
             let axisAligned = [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]]
             guard zip(axisAligned, [1.0, 0, 0, 0, 1, 0, 0, 0, 1]).allSatisfy({ abs($0 - $1) < tolerance })
@@ -848,6 +866,139 @@ extension CSGSplitter {
             return [radius + radius * cos(a), radius + radius * sin(a)]
         }
         return (box, profile)
+    }
+
+    /// The bounding box of a solid this reader cannot describe exactly, flagged as such — or nil
+    /// for anything that is not one of the known primitives.
+    private static func bounded(_ node: Node, _ transform: [Double]) -> Box? {
+        var lo: [Double]? = nil, hi: [Double]? = nil
+        switch node.name {
+        case "polyhedron":
+            let pts = triples(in: node.args)
+            guard !pts.isEmpty else { return nil }
+            lo = (0..<3).map { k in pts.map { $0[k] }.min()! }
+            hi = (0..<3).map { k in pts.map { $0[k] }.max()! }
+            // A polyhedron states its boundary outright, so the piece gets a real one.
+            if let lo, let hi, zip(lo, hi).allSatisfy({ $1 > $0 }) {
+                let placement = multiply(transform, [1, 0, 0, lo[0], 0, 1, 0, lo[1], 0, 0, 1, lo[2], 0, 0, 0, 1])
+                var box = Box(matrix: placement, size: (0..<3).map { hi[$0] - lo[$0] }, centered: false)
+                let local = pts.map { p in (0..<3).map { p[$0] - lo[$0] } }
+                let boundary = polyhedronBoundary(local, faces: indexLists(in: node.args))
+                if !boundary.faces.isEmpty {
+                    box.faces = boundary.faces
+                    box.edges = boundary.edges
+                    return box
+                }
+            }
+        case "sphere":
+            guard let r = named(in: node.args)["r"], r > 0 else { return nil }
+            lo = [-r, -r, -r]; hi = [r, r, r]
+        case "rotate_extrude":
+            // The profile sweeps round z: its x extent is the radius, its y extent the height.
+            var shape: (min: [Double], max: [Double])?
+            for child in node.children { shape = union(shape, shape2D(child, identity)) }
+            guard let shape else { return nil }
+            let radius = Swift.max(abs(shape.min[0]), abs(shape.max[0]))
+            guard radius > 0 else { return nil }
+            lo = [-radius, -radius, shape.min[1]]; hi = [radius, radius, shape.max[1]]
+        default:
+            return nil
+        }
+        guard let lo, let hi, zip(lo, hi).allSatisfy({ $1 > $0 }) else { return nil }
+        let placement = multiply(transform, [1, 0, 0, lo[0], 0, 1, 0, lo[1], 0, 0, 1, lo[2], 0, 0, 0, 1])
+        var box = Box(matrix: placement, size: (0..<3).map { hi[$0] - lo[$0] }, centered: false)
+        box.approximate = true
+        return box
+    }
+
+    /// `faces = [[i, j, k, …], …]` of a polyhedron: index lists into its points.
+    private static func indexLists(in args: String) -> [[Int]] {
+        guard let start = args.range(of: "faces = [") else { return [] }
+        let tail = args[start.upperBound...]
+        let end = tail.range(of: "]]")?.upperBound ?? tail.endIndex
+        var result: [[Int]] = []
+        for list in tail[..<end].components(separatedBy: "[").dropFirst() {
+            let indices = list.split(whereSeparator: { !"0123456789".contains($0) }).compactMap { Int($0) }
+            if indices.count >= 3 { result.append(indices) }
+        }
+        return result
+    }
+
+    /// The faces of a polyhedron as planes and its edges as segments. A face's normal comes from
+    /// Newell's method, so a non-convex polygon is handled; an edge is where two faces meet that
+    /// are not coplanar — two coplanar faces sharing an edge are one face with a seam, not two.
+    private static func polyhedronBoundary(_ pts: [[Double]], faces: [[Int]]) -> (faces: [[Double]], edges: [[Double]]) {
+        var planes: [[Double]] = []
+        var normals: [[Double]?] = []
+        for face in faces {
+            guard face.allSatisfy({ $0 < pts.count }) else { normals.append(nil); continue }
+            var n = [0.0, 0.0, 0.0]
+            var centroid = [0.0, 0.0, 0.0]
+            for (k, i) in face.enumerated() {
+                let a = pts[i], b = pts[face[(k + 1) % face.count]]
+                n[0] += (a[1] - b[1]) * (a[2] + b[2])
+                n[1] += (a[2] - b[2]) * (a[0] + b[0])
+                n[2] += (a[0] - b[0]) * (a[1] + b[1])
+                for j in 0..<3 { centroid[j] += a[j] / Double(face.count) }
+            }
+            let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).squareRoot()
+            guard len > 1e-12 else { normals.append(nil); continue }
+            let unit = n.map { $0 / len }
+            normals.append(unit)
+            planes.append(centroid + unit)
+        }
+
+        // Outward, decided by the solid rather than by winding: OpenSCAD asks for faces wound
+        // clockwise seen from outside, which makes Newell's normal point inward, but designs
+        // wind them either way and OpenSCAD quietly repairs them. If most normals point at the
+        // solid's centroid, the whole boundary is inside out and is flipped as one — flipping
+        // face by face would break a non-convex solid.
+        var solidCentroid = [0.0, 0.0, 0.0]
+        for p in pts { for k in 0..<3 { solidCentroid[k] += p[k] / Double(pts.count) } }
+        var inward = 0
+        for f in planes {
+            var dot = 0.0
+            for k in 0..<3 { dot += (f[k] - solidCentroid[k]) * f[3 + k] }
+            if dot < 0 { inward += 1 }
+        }
+        if inward * 2 > planes.count {
+            planes = planes.map { f in [f[0], f[1], f[2], -f[3], -f[4], -f[5]] }
+            normals = normals.map { n in n.map { [-$0[0], -$0[1], -$0[2]] } }
+        }
+
+        // Edges: each undirected vertex pair with the faces it belongs to.
+        var owners: [String: [Int]] = [:]
+        for (f, face) in faces.enumerated() where normals[f] != nil {
+            for k in face.indices {
+                let a = face[k], b = face[(k + 1) % face.count]
+                owners["\(Swift.min(a, b))-\(Swift.max(a, b))", default: []].append(f)
+            }
+        }
+        var edges: [[Double]] = []
+        for (key, fs) in owners {
+            let ends = key.split(separator: "-").compactMap { Int($0) }
+            guard ends.count == 2, ends.allSatisfy({ $0 < pts.count }) else { continue }
+            let coplanar = fs.count >= 2 && fs.dropFirst().allSatisfy { f in
+                guard let n0 = normals[fs[0]], let n1 = normals[f] else { return false }
+                return abs(n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2]) > 0.9999
+            }
+            if fs.count >= 2 && coplanar { continue }
+            edges.append(pts[ends[0]] + pts[ends[1]])
+        }
+        return (planes, edges)
+    }
+
+    /// `points = [[x, y, z], …]` of a polyhedron.
+    private static func triples(in args: String) -> [[Double]] {
+        guard let start = args.range(of: "points = [") else { return [] }
+        let tail = args[start.upperBound...]
+        let end = tail.range(of: "]]")?.upperBound ?? tail.endIndex
+        var result: [[Double]] = []
+        for triple in tail[..<end].components(separatedBy: "[").dropFirst() {
+            let numbers = triple.split(whereSeparator: { !"0123456789.-e".contains($0) }).compactMap { Double($0) }
+            if numbers.count >= 3 { result.append(Array(numbers.prefix(3))) }
+        }
+        return result
     }
 
     private static func cube(from args: String) -> (size: [Double], centered: Bool)? {

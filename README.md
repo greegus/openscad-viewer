@@ -644,6 +644,12 @@ OpenSCAD is looked up in this order: `OPENSCAD_PATH` → setting →
   `OPENSCADPATH` libraries do not enter the cache key.
 - Measuring covers edges. Face-to-face distance (pitch of two parallel *faces*) is not
   implemented yet.
+- Pieces the CSG reader knows exactly are cubes, cylinders, extrusions of the 2D shapes listed
+  under *What counts as a face*, and polyhedra — a `polyhedron` states its faces outright, so it
+  gets them as planes and its edges as the seams between non-coplanar faces (`Tests/polyhedron.scad`:
+  a wedge of 5 faces and 9 edges, all 8 triangles claimed). A `sphere` or a `rotate_extrude` is
+  bounded by its box and marked *bounds only*: it stays in the list and keeps the names after it
+  in place, but its faces and edges are the box's, not its own.
 - Line overlays behind semi-transparent geometry still show, because transparent materials
   have `depthWrite` off — visible where piece outlines cross the room walls here.
 - Semi-transparent geometry in the design (the room walls here) draws over everything

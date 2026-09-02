@@ -328,6 +328,14 @@ function profileRuns(points) {
 function addSurfaces(source, box, plane, cylinder, prefix) {
   const { min, max } = box;
 
+  // A polyhedron states its own faces; they are the piece's faces, not the box's.
+  if (source.faces) {
+    for (const [px, py, pz, nx, ny, nz] of source.faces) {
+      plane(new THREE.Vector3(min.x + px, min.y + py, min.z + pz), new THREE.Vector3(nx, ny, nz), prefix + 'face');
+    }
+    return;
+  }
+
   if (!source.profile) {
     plane(new THREE.Vector3(min.x, 0, 0), new THREE.Vector3(-1, 0, 0), prefix + 'face', { axis: 'x', at: min.x });
     plane(new THREE.Vector3(max.x, 0, 0), new THREE.Vector3(1, 0, 0), prefix + 'face', { axis: 'x', at: max.x });
@@ -906,7 +914,10 @@ export function pieceOutline(component) {
 
   // The piece's own edges, with the cut-away spans removed. A board with a rounded corner
   // follows its extruded profile; anything else is a box.
-  emit(component.profile ? profileEdges(component.profile, box) : boxEdges(box.min, box.max, identity),
+  emit(component.edges ? component.edges.map(([ax, ay, az, bx, by, bz]) =>
+         [new THREE.Vector3(box.min.x + ax, box.min.y + ay, box.min.z + az),
+          new THREE.Vector3(box.min.x + bx, box.min.y + by, box.min.z + bz)])
+       : component.profile ? profileEdges(component.profile, box) : boxEdges(box.min, box.max, identity),
        cutters);
 
   // Anything derived from a cut must be kept to the piece. The piece's own edges lie inside its

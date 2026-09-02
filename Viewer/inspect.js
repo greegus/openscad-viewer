@@ -375,7 +375,10 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     if (target.type === 'part') {
       const p = target.piece;
       const [sx, sy, sz] = p.size;
-      return { name: p.source?.name ?? `${mm(sx)} × ${mm(sy)} × ${mm(sz)} mm`, id: p.id ?? null };
+      // A solid the reader could only bound (a polyhedron, a sphere) is marked, since its faces
+      // and edges are those of its box, not its own.
+      const name = p.source?.name ?? `${mm(sx)} × ${mm(sy)} × ${mm(sz)} mm`;
+      return { name: p.source?.approximate ? `${name} (bounds only)` : name, id: p.id ?? null };
     }
     if (target.type === 'edge') {
       const kind = { arc: 'Arc', ellipse: 'Ellipse' }[target.feature.type] ?? 'Edge';
