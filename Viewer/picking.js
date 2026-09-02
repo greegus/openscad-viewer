@@ -808,11 +808,27 @@ export function pieceOutline(component) {
   emit(component.profile ? profileEdges(component.profile, box) : boxEdges(box.min, box.max, identity),
        cutters);
 
+  // Anything derived from a cut must be kept to the piece. The piece's own edges lie inside its
+  // box by construction, but a cut's do not: a handle recess deliberately reaches above the top
+  // of the drawer front so the grip is open, and its rim was being drawn up there in the air —
+  // 34 of a front's 150 outline segments, and the same for a groove running past a shelf.
+  const withinPiece = (edges) => {
+    const kept = [];
+    for (const [a, b] of edges) {
+      const span = clipToBoxSpan(a, b, box, 0.01);
+      if (!span) continue;
+      const from = a.clone().lerp(b, span[0]);
+      const to = a.clone().lerp(b, span[1]);
+      if (from.distanceTo(to) > 1e-6) kept.push([from, to]);
+    }
+    return kept;
+  };
+
   // What each cut leaves behind.
   cutters.forEach((cutter, index) => {
     const others = cutters.filter((_, i) => i !== index);
     if (cutter.profile) {
-      emit(holeEdges(cutter, box), others);
+      emit(withinPiece(holeEdges(cutter, box)), others);
     } else if (cutter.overlap && !cutter.approximate) {
       emit(overlapEdges(cutter.overlap, identity), others);
     }
@@ -826,7 +842,7 @@ export function pieceOutline(component) {
   // it — rather than across the empty hole.
   if (!component.profile) {
     cutters.forEach((cutter, index) => {
-      emit(tangentEdges(cutter, box), cutters.filter((_, i) => i !== index));
+      emit(withinPiece(tangentEdges(cutter, box)), cutters.filter((_, i) => i !== index));
     });
   }
 
@@ -835,7 +851,7 @@ export function pieceOutline(component) {
   for (let i = 0; i < cutters.length; i++) {
     for (let j = i + 1; j < cutters.length; j++) {
       const rest = cutters.filter((_, k) => k !== i && k !== j);
-      emit(cutIntersectionEdges(cutters[i], cutters[j], box), rest);
+      emit(withinPiece(cutIntersectionEdges(cutters[i], cutters[j], box)), rest);
     }
   }
 

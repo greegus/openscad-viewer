@@ -295,7 +295,14 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
     exactly the triangles Delete removes — so you see what will go before it goes. A welded
     piece has no triangles of its own, so they are recovered by centroid containment in its box
     and cached per piece, or a hover would redo the scan every frame.
-  - **A cut that only touches a face** is an edge, and it splits the face. A cylinder of radius half
+  - **Every edge a cut contributes is kept to the piece.** The piece's own edges lie inside its box
+  by construction, but a cut's do not: a handle recess deliberately reaches above the top of the
+  drawer front so the grip is open, and its rim was being drawn up there in the air — 34 of a
+  front's 150 outline segments, and a groove's rim running well past a shelf. Rims, tangents and
+  cut-cut intersections are now clipped to the piece's box. The check that found it is worth
+  keeping as an invariant: for every piece, no outline segment's midpoint may lie outside the
+  piece. kniznica.scad: 65 pieces, 2466 segments, none outside.
+- **A cut that only touches a face** is an edge, and it splits the face. A cylinder of radius half
   the side drilled through a cube is tangent to every wall it runs between, and along that line
   the material behind the wall is cut down to nothing; where two such lines cross, the wall has
   zero thickness — which cannot be made. A B-rep kernel treats the tangent as an edge regardless

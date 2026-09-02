@@ -5,7 +5,7 @@
   :root { color-scheme: light dark; }
   html, body { margin: 0; height: 100%; overflow: hidden; }
   body { background: #f5f5f5; }
-  @media (prefers-color-scheme: dark) { body { background: #1e1e1e; } }
+  @media (prefers-color-scheme: dark) { body { background: #2a2a2e; } }   /* = scene */
   #canvas { display: block; width: 100%; height: 100%; }
   #status {
     position: absolute; inset: 0; display: grid; place-items: center;
@@ -225,7 +225,9 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, stencil: tru
 renderer.setPixelRatio(devicePixelRatio);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(dark ? 0x1e1e1e : 0xf5f5f5);
+// Dark mode sits a step above the window's own chrome (#1e1e1e), so the model reads as lit rather
+// than floating in a void, and the black of a through-hole still contrasts with it.
+scene.background = new THREE.Color(dark ? 0x2a2a2e : 0xf5f5f5);
 // Two cameras, swapped in place. `view` is handed to the tools so they always read the
 // active one rather than a camera captured at construction time.
 const perspective = new THREE.PerspectiveCamera(40, 1, 0.1, 1000);
@@ -1018,6 +1020,28 @@ window.debug = {
   /// The CSG faces of a piece and how much of the mesh each one covers — for checking that
   /// identity comes from the CSG and the mesh only supplies pixels.
   /// Each plane face's dividers and the sub-faces they produce, with triangle counts.
+  /// Outline segments of a piece whose midpoint lies outside the piece's own box. An edge in
+  /// empty air is cutter geometry leaking into the drawing, not an edge of the piece.
+  strayEdges: (id) => {
+    const piece = pieceModel.find((p) => p.id === id);
+    if (!piece) return null;
+    const o = piece.outline;
+    const slack = 0.1;
+    let inside = 0, outside = 0;
+    const strays = [];
+    const mid = new THREE.Vector3();
+    for (let k = 0; k < o.length; k += 6) {
+      mid.set((o[k]+o[k+3])/2, (o[k+1]+o[k+4])/2, (o[k+2]+o[k+5])/2).applyMatrix4(piece.inverse);
+      const b = piece.box;
+      const ok = mid.x >= b.min.x - slack && mid.x <= b.max.x + slack
+              && mid.y >= b.min.y - slack && mid.y <= b.max.y + slack
+              && mid.z >= b.min.z - slack && mid.z <= b.max.z + slack;
+      if (ok) inside++;
+      else { outside++; if (strays.length < 5) strays.push([mid.x, mid.y, mid.z].map((v) => +v.toFixed(2))); }
+    }
+    return { id, name: piece.name, size: piece.size, cutters: (piece.source.cutters ?? []).length,
+             segments: o.length / 6, inside, outside, strays };
+  },
   dividersOf: (id) => {
     const piece = pieceModel.find((p) => p.id === id);
     if (!piece) return null;
