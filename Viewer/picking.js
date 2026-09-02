@@ -1040,7 +1040,7 @@ function cutIntersectionEdges(a, b, box) {
     // The ruling as a segment spanning the cut's depth, taken into the other cut's space.
     const p = new THREE.Vector3(px, py, a.min.z).applyMatrix4(aToB);
     const q = new THREE.Vector3(px, py, a.max.z).applyMatrix4(aToB);
-    const span = clipToPrism(p, q, b);
+    const span = clipToPrism(p, q, b) ?? grazeOfPrism(p, q, b);
     if (!span) { entering.push(null); leaving.push(null); continue; }
 
     // Back into the piece's coordinates, where every other edge lives.
@@ -1062,6 +1062,33 @@ function cutIntersectionEdges(a, b, box) {
     }
   }
   return edges;
+}
+
+/// Where a ruling only grazes a prism: the point at which it crosses one of the prism's own
+/// rulings, as a zero-length [t, t], or null when it does not touch.
+///
+/// Two equal cylinders crossing meet in two ellipses, and the ellipses meet each other exactly
+/// where each cylinder touches the wall — the point the wall is divided at. There the ruling of
+/// one lies along the tangent plane of the other and clipping finds nothing inside, so the curve
+/// used to jump from the vertex before that point to the vertex after and stop 3 mm short of the
+/// rim. The polyhedral intersection has a vertex there: the two rulings cross.
+function grazeOfPrism(p, q, prism) {
+  const dx = q.x - p.x, dy = q.y - p.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return null;
+  const eps = 1e-4;
+  for (const [vx, vy] of prism.profile) {
+    // Distance from the vertex to the ruling's line in the profile plane, and where along it.
+    const t = ((vx - p.x) * dx + (vy - p.y) * dy) / (len * len);
+    if (t < -eps || t > 1 + eps) continue;
+    const cx = p.x + dx * t, cy = p.y + dy * t;
+    if (Math.hypot(cx - vx, cy - vy) > eps) continue;
+    const z = p.z + (q.z - p.z) * t;
+    if (z < prism.min.z - eps || z > prism.max.z + eps) continue;
+    const tt = Math.min(1, Math.max(0, t));
+    return [tt, tt];
+  }
+  return null;
 }
 
 /// The part of segment p→q inside a prism, as [t0, t1] in the segment's own parameter, or null.

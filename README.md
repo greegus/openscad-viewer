@@ -189,8 +189,11 @@ leaves where it enters and leaves the piece. The box will not do: a cylinder of 
 side has a box the size of the whole cube, and clipping against that erases every edge the cube
 has. The rim is the cut's own profile drawn at the depths the piece stops it — and it is real
 geometry that the mesh cannot supply, since a cylindrical wall is smooth and a tangent line is
-not a crease. `Tests/cylinder.scad`: 396 outline segments, being the cube's 12 edges plus two
-cuts times two circles of 96.
+not a crease. Two cuts crossing meet in a curve of their own, drawn ruling by ruling; where a
+ruling only grazes the other cut — the point where each cylinder touches the wall, and where the
+two ellipses of the crossing meet — the crossing of the two rulings is the vertex, or the curve
+stops a step short of the rim. `Tests/cylinder.scad`: 600 outline segments, being the cube's
+12 edges, two cuts times two circles of 96, and the two crossing curves.
 
 ### What counts as an edge
 
