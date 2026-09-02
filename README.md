@@ -207,7 +207,7 @@ them differently:
 | arc rim | where a rounded side meets a flat face | yes |
 | the rounded surface itself | facets 3.75° apart at `$fn = 96` | **no** — under the 20° threshold |
 | silhouette | the outline you *see* | **no** — it depends on the camera |
-| tangent transition | flat meeting round | yes, but smooth, so not drawn |
+| tangent transition | flat meeting round | yes: a boundary between two faces, drawn as Fusion draws it |
 | weld seam | where `union` joined two panels | sometimes absent, sometimes spurious |
 | inner loop | the boundary of a hole, e.g. a handle recess | yes |
 
@@ -271,9 +271,13 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
     per part by welding triangles that share an edge and lie in the same plane — otherwise
     clicking a panel would select half a rectangle.
   - A rounded board is drawn as its actual **profile**, not as its bounding box: the profile at
-    top and bottom, joined by verticals only where it genuinely turns. A tessellated arc is a
-    smooth surface with no edges along it, so joining every point would fence every rounded
-    corner in. Only when the profile is a single shape — two disjoint shapes under one extrude
+    top and bottom, joined by a vertical at every run boundary (a corner, or the tangent where
+    a flat blends into an arc) and by none along the arc itself. A tessellated arc is a smooth
+    surface with no edges along it, so joining every point would fence every rounded corner in.
+    The runs are the same ones the faces are built from (`profileRuns`), so an edge is drawn
+    exactly where one face ends and the next begins. For a while the tangent was left out as
+    smooth and therefore not an edge; it is an edge of the face, not of the surface, and Fusion
+    draws it. Only when the profile is a single shape — two disjoint shapes under one extrude
     have no single outline, and a wrong outline is worse than falling back to the box. Note
     `merged()` must leave these alone: it rebuilds components as bare boxes, which threw
     the profile away and put the square corners straight back.

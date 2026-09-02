@@ -245,31 +245,20 @@ export function pieceFaces(piece) {
   return faces;
 }
 
-/// The surfaces of one primitive — a box, or a profile extruded along z.
-function addSurfaces(source, box, plane, cylinder, prefix) {
-  const { min, max } = box;
-
-  if (!source.profile) {
-    plane(new THREE.Vector3(min.x, 0, 0), new THREE.Vector3(-1, 0, 0), prefix + 'face', { axis: 'x', at: min.x });
-    plane(new THREE.Vector3(max.x, 0, 0), new THREE.Vector3(1, 0, 0), prefix + 'face', { axis: 'x', at: max.x });
-    plane(new THREE.Vector3(0, min.y, 0), new THREE.Vector3(0, -1, 0), prefix + 'face', { axis: 'y', at: min.y });
-    plane(new THREE.Vector3(0, max.y, 0), new THREE.Vector3(0, 1, 0), prefix + 'face', { axis: 'y', at: max.y });
-    plane(new THREE.Vector3(0, 0, min.z), new THREE.Vector3(0, 0, -1), prefix + 'face', { axis: 'z', at: min.z });
-    plane(new THREE.Vector3(0, 0, max.z), new THREE.Vector3(0, 0, 1), prefix + 'face', { axis: 'z', at: max.z });
-    return;
-  }
-
-  // Caps.
-  plane(new THREE.Vector3(0, 0, min.z), new THREE.Vector3(0, 0, -1), prefix + 'bottom');
-  plane(new THREE.Vector3(0, 0, max.z), new THREE.Vector3(0, 0, 1), prefix + 'top');
-
-  // The side, run by run: a straight stretch of profile is one plane, a curved stretch one
-  // cylinder. Three kinds of vertex, not two: a turn under 1.5° is tessellation noise on a
-  // straight side, a turn up to 30° is a step along a tessellated arc, and anything sharper is
-  // a corner. With only the first two, a 90° corner counted as "curved" and a shelf with one
-  // rounded corner and three sharp ones became a single arc through the whole outline — a
-  // cylinder of radius 454 that nothing in the mesh could match, and no side faces at all.
-  const profile = source.profile.map(([x, y]) => new THREE.Vector2(x, y));
+/// The runs of a profile: each a straight stretch (one side) or a sampled arc (one cylinder).
+///
+/// Three kinds of vertex, not two: a turn under 1.5° is tessellation noise on a straight side, a
+/// turn up to 30° is a step along a tessellated arc, and anything sharper is a corner. With only
+/// the first two, a 90° corner counted as "curved" and a shelf with one rounded corner and three
+/// sharp ones became a single arc through the whole outline — a cylinder of radius 454 that
+/// nothing in the mesh could match, and no side faces at all.
+///
+/// Runs are what faces are built from and what the edge overlay draws verticals at, so the two
+/// cannot disagree on where a side ends and a curve begins. A run boundary is an edge whether it
+/// is a corner or a tangent: a rounded corner's blend into the flat is a boundary between two
+/// faces, and a B-rep draws it even though nothing creases there — as Fusion does.
+function profileRuns(points) {
+  const profile = points.map(([x, y]) => new THREE.Vector2(x, y));
   const n = profile.length;
   const STRAIGHT = 1.5 * Math.PI / 180;
   const CORNER = 30 * Math.PI / 180;
@@ -331,6 +320,32 @@ function addSurfaces(source, box, plane, cylinder, prefix) {
       r = runs.indexOf(run);
     }
   }
+
+  return { runs, at, fitOf };
+}
+
+/// The surfaces of one primitive — a box, or a profile extruded along z.
+function addSurfaces(source, box, plane, cylinder, prefix) {
+  const { min, max } = box;
+
+  if (!source.profile) {
+    plane(new THREE.Vector3(min.x, 0, 0), new THREE.Vector3(-1, 0, 0), prefix + 'face', { axis: 'x', at: min.x });
+    plane(new THREE.Vector3(max.x, 0, 0), new THREE.Vector3(1, 0, 0), prefix + 'face', { axis: 'x', at: max.x });
+    plane(new THREE.Vector3(0, min.y, 0), new THREE.Vector3(0, -1, 0), prefix + 'face', { axis: 'y', at: min.y });
+    plane(new THREE.Vector3(0, max.y, 0), new THREE.Vector3(0, 1, 0), prefix + 'face', { axis: 'y', at: max.y });
+    plane(new THREE.Vector3(0, 0, min.z), new THREE.Vector3(0, 0, -1), prefix + 'face', { axis: 'z', at: min.z });
+    plane(new THREE.Vector3(0, 0, max.z), new THREE.Vector3(0, 0, 1), prefix + 'face', { axis: 'z', at: max.z });
+    return;
+  }
+
+  // Caps.
+  plane(new THREE.Vector3(0, 0, min.z), new THREE.Vector3(0, 0, -1), prefix + 'bottom');
+  plane(new THREE.Vector3(0, 0, max.z), new THREE.Vector3(0, 0, 1), prefix + 'top');
+
+  // The side, run by run: a straight stretch of profile is one plane, a curved stretch one
+  // cylinder. The runs come from `profileRuns`, the same division the edge overlay draws its
+  // verticals at, so a face and the edge bounding it agree by construction.
+  const { runs, at, fitOf } = profileRuns(source.profile);
 
   for (const run of runs) {
     const a = at(run.start);
@@ -767,22 +782,25 @@ export function trianglesInBox(mesh, component) {
 /// Verticals only where the profile actually turns — a tessellated arc is a smooth surface with
 /// no edges along it, so joining every point would draw a fence around every rounded corner.
 function profileEdges(profile, box) {
-  const turn = 15 * Math.PI / 180;
-  const zLow = box.min.z;
-  const zHigh = box.max.z;
+  return profileRims(profile, box.min.z, box.max.z);
+}
+
+/// A profile drawn at two depths, with a vertical at every run boundary between them — a corner
+/// or the tangent where a flat blends into an arc — and none along an arc, which is one smooth
+/// face however it was tessellated.
+function profileRims(profile, zLow, zHigh) {
   const at = (p, z) => new THREE.Vector3(p[0], p[1], z);
   const edges = [];
-
   for (let i = 0; i < profile.length; i++) {
     const a = profile[i];
     const b = profile[(i + 1) % profile.length];
     edges.push([at(a, zLow), at(b, zLow)], [at(a, zHigh), at(b, zHigh)]);
-
-    const previous = profile[(i - 1 + profile.length) % profile.length];
-    const incoming = new THREE.Vector2(a[0] - previous[0], a[1] - previous[1]).normalize();
-    const outgoing = new THREE.Vector2(b[0] - a[0], b[1] - a[1]).normalize();
-    if (Math.acos(Math.max(-1, Math.min(1, incoming.dot(outgoing)))) > turn) {
-      edges.push([at(a, zLow), at(a, zHigh)]);
+  }
+  const { runs, at: vertex } = profileRuns(profile);
+  if (runs.length > 1) {
+    for (const run of runs) {
+      const v = vertex(run.start);
+      edges.push([new THREE.Vector3(v.x, v.y, zLow), new THREE.Vector3(v.x, v.y, zHigh)]);
     }
   }
   return edges;
@@ -1136,18 +1154,10 @@ function holeEdges(cutter, box) {
   const zHigh = Math.min(cutter.max.z, depthLimit(cutter, box, true));
   if (!(zHigh > zLow)) return [];
 
-  const edges = [];
-  for (const z of [zLow, zHigh]) {
-    for (let i = 0; i < cutter.profile.length; i++) {
-      const p = cutter.profile[i];
-      const q = cutter.profile[(i + 1) % cutter.profile.length];
-      edges.push([
-        new THREE.Vector3(p[0], p[1], z).applyMatrix4(cutter.toPiece),
-        new THREE.Vector3(q[0], q[1], z).applyMatrix4(cutter.toPiece),
-      ]);
-    }
-  }
-  return edges;
+  // Rims at both depths, and down the wall of the cut a line wherever its profile changes run —
+  // a handle recess has an edge where its flat bottom blends into each rounded end.
+  return profileRims(cutter.profile, zLow, zHigh).map(([a, b]) =>
+    [a.applyMatrix4(cutter.toPiece), b.applyMatrix4(cutter.toPiece)]);
 }
 
 /// How deep into the cutter the piece reaches, along the cutter's own extrusion axis.
