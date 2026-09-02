@@ -152,7 +152,7 @@ import { STLLoader } from './vendor/STLLoader.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { createMeasure } from './measure.js';
 import { createInspect } from './inspect.js';
-import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
+import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
 import { updateStrokeResolution } from './strokes.js';
 import { createGrid } from './grid.js';
 import { createPalette } from './palette.js';
@@ -1022,6 +1022,17 @@ window.debug = {
   /// Each plane face's dividers and the sub-faces they produce, with triangle counts.
   /// Outline segments of a piece whose midpoint lies outside the piece's own box. An edge in
   /// empty air is cutter geometry leaking into the drawing, not an edge of the piece.
+  /// Pieces whose triangles fall in more than one material mesh: the case where "the mesh the
+  /// ray hit" and "the mesh holding most of the piece" can disagree.
+  multiMaterial: () => {
+    const out = [];
+    for (const piece of pieceModel) {
+      const counts = parts.map((p) => trianglesTouchingBox(p.mesh, piece.source ?? piece).length);
+      const nonzero = counts.filter((n) => n > 0).length;
+      if (nonzero > 1) out.push({ id: piece.id, name: piece.name, perMesh: counts });
+    }
+    return out;
+  },
   strayEdges: (id) => {
     const piece = pieceModel.find((p) => p.id === id);
     if (!piece) return null;

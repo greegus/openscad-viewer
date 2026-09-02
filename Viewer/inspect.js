@@ -309,12 +309,12 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
       const h = hit(px);
       if (!h) return null;
       const piece = pieceAt(h.point);
-      // Its surfaces as well as its outline: holding the modifier should show what would go,
-      // not just where its edges run.
-      // Touching, not wholly inside: clipToBox trims them back, and anything that merely
-      // overlaps this piece would otherwise be dropped and leave a gap in the highlight.
-      if (piece) return { type: 'part', piece, mesh: h.object,
-                          triangles: trianglesTouchingBox(h.object, piece.source ?? piece) };
+      // One way to build a piece target, shared with the parts list. Building it here from the
+      // mesh the ray happened to hit meant a hover in the scene and a click in the list could
+      // light up different geometry for the same piece — the hit mesh might be a neighbouring
+      // material merely brushing the box. Same target, four routes to it; only the stroke style
+      // differs, and that lives in show().
+      if (piece) return pieceTarget(piece.id);
       // No CSG box here. Fall back to the welded solid — but only if it is actually a piece:
       // after the union most of a design is one connected body, and offering "the whole model"
       // as a selection is never what the modifier is for.
