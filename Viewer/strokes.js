@@ -48,7 +48,14 @@ export function createStroke({ scene, color, width = 2, outline = 1, renderOrder
       const flat = [];
       for (const p of points) flat.push(p.x, p.y, p.z);
       geometry.setPositions(flat);
-      // Fat lines are instanced; without this the bounds stay empty and it can be culled.
+      // Fat lines are instanced, and the renderer (three r160) remembers how many instances the
+      // geometry had the first time it was bound — `_maxInstanceCount` is set only while
+      // undefined and cleared only by dispose(). A stroke first used for one edge then drew at
+      // most one segment for the rest of its life: a hovered piece showed its first few edges
+      // and stopped mid-circle, while the selection stroke, first used on a whole piece, drew
+      // everything. Forgetting the remembered cap makes the next bind measure the new buffer.
+      delete geometry._maxInstanceCount;
+      // Without this the bounds stay empty and it can be culled.
       geometry.computeBoundingSphere();
       halo.visible = true;
       core.visible = true;
@@ -56,6 +63,8 @@ export function createStroke({ scene, color, width = 2, outline = 1, renderOrder
     set visible(on) { halo.visible = on; core.visible = on; },
     /// Diagnostic: how many segments are actually in the buffer.
     get segmentCount() { return geometry.attributes.instanceStart?.count ?? 0; },
+    /// Diagnostic: the segment endpoints as drawn, rounded, so two strokes can be compared.
+    positions() { const a = geometry.attributes.instanceStart?.data?.array; return a ? Array.from(a).map((v) => Math.round(v * 100) / 100) : []; },
     get visible() { return core.visible; },
     setColor(value) { core.material.color.set(value); },
   };

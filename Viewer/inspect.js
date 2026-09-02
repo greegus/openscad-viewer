@@ -822,6 +822,8 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     // Visibility included on purpose: the buffer keeps its segments after a stroke is hidden,
     // so a bare count answers "what was last built", not "what is on screen".
     drawnHover: hoverLines.visible ? hoverLines.segmentCount : 0,
+    hoverPositions: hoverLines.positions(), selectPositions: selectLines.positions(),
+    hoverType: hovered?.type ?? null, selectType: selected?.type ?? null, hoverPiece: hovered?.piece?.id ?? null, selectPiece: selected?.piece?.id ?? null,
     // Extent of the face actually drawn, not of the triangles it came from: the two differ
     // once the highlight is clipped to a piece, which is the whole point of the clipping.
     selectedFace: (() => {
