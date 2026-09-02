@@ -378,7 +378,8 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
       return { name: p.source?.name ?? `${mm(sx)} × ${mm(sy)} × ${mm(sz)} mm`, id: p.id ?? null };
     }
     if (target.type === 'edge') {
-      return { name: target.feature.type === 'arc' ? 'Arc' : 'Edge', id: null };
+      const kind = { arc: 'Arc', ellipse: 'Ellipse' }[target.feature.type] ?? 'Edge';
+      return { name: kind, id: null };
     }
     if (target.type === 'body') return { name: 'Body', id: null };
     const round = target.face?.kind === 'cylinder';
@@ -399,6 +400,12 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
           ['Sweep', `${(f.sweep * 180 / Math.PI).toFixed(1)}°`],
           ['Length', `${mm(f.length)} mm`],
           ...(axis ? [['Around', axis]] : []),
+        ];
+      }
+      if (f.type === 'ellipse') {
+        return [
+          ['Semi-axes', `${mm(f.a)} × ${mm(f.b)} mm`],
+          ['Length', `${mm(f.length)} mm`],
         ];
       }
       const axis = axisName(f.b.clone().sub(f.a).normalize());
@@ -447,7 +454,9 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     if (!target) return '';
     if (target.type === 'edge') {
       const f = target.feature;
-      return f.type === 'arc' ? `R ${mm(f.radius)} mm` : `${mm(f.length)} mm`;
+      if (f.type === 'arc') return `R ${mm(f.radius)} mm`;
+      if (f.type === 'ellipse') return `${mm(f.a)} × ${mm(f.b)} mm`;
+      return `${mm(f.length)} mm`;
     }
     if (target.type === 'part') {
       const [sx, sy, sz] = target.piece.size;
@@ -837,6 +846,10 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     return [p.x, p.y, arc.segments.length];
   };
 
+  const ellipses = () => state.features.filter((f) => f.type === 'ellipse').map((f) => ({
+    a: Math.round(f.a * 10) / 10, b: Math.round(f.b * 10) / 10, segments: f.segments.length,
+    length: Math.round(f.length), centre: [f.centre.x, f.centre.y, f.centre.z].map((v) => Math.round(v)),
+  }));
   const arcs = () => state.features.filter((f) => f.type === 'arc').map((f) => ({
     radius: Math.round(f.radius * 10) / 10,
     sweep: Math.round(f.sweep * 180 / Math.PI * 10) / 10,
@@ -845,6 +858,6 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     points: f.points.map((q) => [q.x, q.y, q.z].map((v) => Math.round(v))),
   }));
 
-  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, arcPoint, selection, highlightPiece, highlightPieces, selectPiece, features, longestFeature, edgesInPiece, pieceCoverage,
+  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, arcPoint, selection, highlightPiece, highlightPieces, selectPiece, features, longestFeature, edgesInPiece, pieceCoverage, ellipses,
            clear, update };
 }

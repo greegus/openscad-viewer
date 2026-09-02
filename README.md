@@ -193,7 +193,10 @@ not a crease. Two cuts crossing meet in a curve of their own, drawn ruling by ru
 ruling only grazes the other cut — the point where each cylinder touches the wall, and where the
 two ellipses of the crossing meet — the crossing of the two rulings is the vertex, or the curve
 stops a step short of the rim. `Tests/cylinder.scad`: 600 outline segments, being the cube's
-12 edges, two cuts times two circles of 96, and the two crossing curves.
+12 edges, two cuts times two circles of 96, and the two crossing curves. Those curves are
+picked as what they are: a run no circle fits is tried as an ellipse (a conic fitted in the run's
+plane, accepted only if every point lies on it), and the quarters the touch points cut it into are
+joined the way arcs of one circle are — hover reports one ellipse of semi-axes 70.7 × 50 mm.
 
 ### What counts as an edge
 

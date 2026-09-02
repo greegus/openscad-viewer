@@ -1379,13 +1379,17 @@ export function buildFeatures(edges) {
 /// should give the rim rather than half of it. Only arcs sharing a centre, a radius and a plane
 /// are joined, so two distinct circles that happen to touch stay apart.
 function mergeCircles(features) {
-  const arcs = features.filter((f) => f.type === 'arc' && f.centre && f.radius);
+  const arcs = features.filter((f) => (f.type === 'arc' && f.centre && f.radius) || f.type === 'ellipse');
   if (arcs.length < 2) return features;
 
   const ends = (f) => [f.segments[0].a, f.segments[f.segments.length - 1].b];
   const touching = (a, b) => ends(a).some((p) => ends(b).some((q) => p.distanceTo(q) < 0.05));
+  // The same circle, or the same ellipse: the cube's crossing curves are cut into quarters by
+  // the four points where the cuts touch the walls, and are still each one ellipse.
   const coCircular = (a, b) =>
-    Math.abs(a.radius - b.radius) < 0.05
+    a.type === b.type
+    && (a.type === 'arc' ? Math.abs(a.radius - b.radius) < 0.05
+                         : Math.abs(a.a - b.a) < 0.05 && Math.abs(a.b - b.b) < 0.05)
     && a.centre.distanceTo(b.centre) < 0.05
     && (!a.normal || !b.normal || Math.abs(a.normal.dot(b.normal)) > 0.999);
 
@@ -1446,7 +1450,107 @@ function makeFeature(points, curved) {
   }
 
   const length = segments.reduce((n, s) => n + s.a.distanceTo(s.b), 0);
+
+  // Not a circle, but still a curve: two cylinders crossing meet in an ellipse, and the mesh
+  // has no other way to say so than a run of equal-ish steps that no circle fits.
+  if (curved && points.length >= 6) {
+    const ellipse = ellipseThrough(points);
+    if (ellipse && length >= 5) return { type: 'ellipse', segments, points, length, ...ellipse };
+  }
+
   return { type: 'line', segments, points, length, a: points[0], b: points[points.length - 1] };
+}
+
+/// The ellipse a planar run of points lies on — centre, semi-axes and their directions — or null.
+///
+/// The conic is fitted by least squares in the run's own plane (Ax² + Bxy + Cy² + Dx + Ey = 1,
+/// after centring and scaling so the system is well conditioned), then read back as centre and
+/// axes. Every point must then lie on it within half a percent of the major axis: the fit is
+/// only accepted as an ellipse when the points genuinely are one, not merely nearest to one.
+function ellipseThrough(points) {
+  const n = points.length;
+  const centroid = points.reduce((acc, p) => acc.add(p), new THREE.Vector3()).divideScalar(n);
+  const extent = points.reduce((m, p) => Math.max(m, p.distanceTo(centroid)), 0);
+  if (extent < 1e-6) return null;
+  const planeTolerance = Math.max(0.05, extent * 0.005);
+
+  // The plane: normal from the two most spread directions, then every point checked against it.
+  const first = points[0].clone().sub(centroid);
+  let normal = null;
+  for (let i = 1; i < n && !normal; i++) {
+    const cross = first.clone().cross(points[i].clone().sub(centroid));
+    if (cross.length() > extent * extent * 0.05) normal = cross.normalize();
+  }
+  if (!normal) return null;
+  if (!points.every((p) => Math.abs(p.clone().sub(centroid).dot(normal)) < planeTolerance)) return null;
+
+  const u = first.clone().normalize();
+  const v = normal.clone().cross(u).normalize();
+  const flat = points.map((p) => {
+    const d = p.clone().sub(centroid);
+    return [d.dot(u) / extent, d.dot(v) / extent];
+  });
+
+  // Normal equations for the five conic coefficients.
+  const rows = flat.map(([x, y]) => [x * x, x * y, y * y, x, y]);
+  const m = Array.from({ length: 5 }, () => new Array(6).fill(0));
+  for (const r of rows) {
+    for (let i = 0; i < 5; i++) {
+      for (let j = 0; j < 5; j++) m[i][j] += r[i] * r[j];
+      m[i][5] += r[i];
+    }
+  }
+  const coefficients = solveLinear(m);
+  if (!coefficients) return null;
+  const [A, B, C, D, E] = coefficients;
+  if (B * B - 4 * A * C >= -1e-9) return null;                       // not an ellipse
+
+  // Centre, and the quadratic about it.
+  const det = 4 * A * C - B * B;
+  const cx = (B * E - 2 * C * D) / det;
+  const cy = (B * D - 2 * A * E) / det;
+  const k = 1 - (A * cx * cx + B * cx * cy + C * cy * cy + D * cx + E * cy);
+  if (k <= 0) return null;
+  // Eigenvalues of [[A, B/2], [B/2, C]]: the semi-axes are sqrt(k / λ).
+  const half = (A + C) / 2;
+  const diff = Math.sqrt(((A - C) / 2) ** 2 + (B / 2) ** 2);
+  const l1 = half - diff, l2 = half + diff;                          // l1 ≤ l2 → major axis first
+  if (l1 <= 0) return null;
+  const a = Math.sqrt(k / l1) * extent;
+  const b = Math.sqrt(k / l2) * extent;
+  if (a / b > 50) return null;
+  const angle = Math.abs(B) < 1e-12 ? (A <= C ? 0 : Math.PI / 2) : Math.atan2(l1 - A, B / 2);
+
+  // Every point on the curve: algebraic residual over gradient is the distance to first order.
+  const tolerance = Math.max(0.05, a * 0.005) / extent;
+  for (const [x, y] of flat) {
+    const q = A * x * x + B * x * y + C * y * y + D * x + E * y - 1;
+    const gx = 2 * A * x + B * y + D, gy = B * x + 2 * C * y + E;
+    const grad = Math.hypot(gx, gy);
+    if (grad < 1e-12 || Math.abs(q) / grad > tolerance) return null;
+  }
+
+  const centre = centroid.clone().addScaledVector(u, cx * extent).addScaledVector(v, cy * extent);
+  const major = u.clone().multiplyScalar(Math.cos(angle)).addScaledVector(v, Math.sin(angle)).normalize();
+  return { centre, normal, a, b, major };
+}
+
+/// Gaussian elimination with partial pivoting on an augmented n × (n+1) matrix, or null when
+/// singular.
+function solveLinear(m) {
+  const n = m.length;
+  for (let col = 0; col < n; col++) {
+    let pivot = col;
+    for (let r = col + 1; r < n; r++) if (Math.abs(m[r][col]) > Math.abs(m[pivot][col])) pivot = r;
+    if (Math.abs(m[pivot][col]) < 1e-12) return null;
+    [m[col], m[pivot]] = [m[pivot], m[col]];
+    for (let r = 0; r < n; r++) {
+      if (r === col) continue;
+      const f = m[r][col] / m[col][col];
+      for (let c = col; c <= n; c++) m[r][c] -= f * m[col][c];
+    }
+  }
+  return m.map((row, i) => row[n] / row[i]);
 }
 
 /// Nearest feature to the cursor, honouring occlusion the same way `edgeUnderCursor` does.
