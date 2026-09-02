@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { toScreen, cursorPx, pointToSegment2D, pieceFeatures, featureUnderCursor,
-         axisName, pieceFaces, assignTriangles, trianglesTouchingBox, clipToBox,
+         axisName, pieceFaces, assignTriangles, trianglesTouchingBox, trianglesInBox, clipToBox,
          MODEL_TO_WORLD } from './picking.js';
 import { createStroke } from './strokes.js';
 
@@ -126,8 +126,15 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     state.faceTriangles = new Map(); // face -> { mesh, triangles }
     for (const mesh of state.meshes) state.faceOf.set(mesh, new Map());
 
+    // Triangles per piece, per mesh — the union of its faces. This is what a whole-piece
+    // highlight draws from. The box test cannot do this job: it admits a neighbour's triangles
+    // wherever they brush the box, and on kniznica.scad that is 48 of 65 pieces.
+    state.pieceTriangles = new Map();
+
     for (const piece of state.pieces) {
       const faces = pieceFaces(piece);
+      const mine = new Map();
+      state.pieceTriangles.set(piece, mine);
       for (const mesh of state.meshes) {
         const near = trianglesTouchingBox(mesh, piece.source ?? piece);
         if (!near.length) continue;
@@ -139,6 +146,8 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
           else state.faceTriangles.set(face, { mesh, triangles });
           const lookup = state.faceOf.get(mesh);
           for (const t of triangles) if (!lookup.has(t)) lookup.set(t, face);
+          const own = mine.get(mesh);
+          if (own) own.push(...triangles); else mine.set(mesh, [...triangles]);
         }
       }
     }
@@ -285,10 +294,17 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
                                       target.piece.outline[i + 2]));
       }
       lines.setPoints(points);
-      if (target.triangles?.length) {
+      const groups = target.groups ?? (target.triangles?.length ? [{ mesh: target.mesh, triangles: target.triangles }] : []);
+      if (groups.length) {
+        // Every material the piece has triangles in, clipped to the piece and merged into one fill.
+        const positions = [];
+        for (const g of groups) {
+          for (const v of clipToBox(g.mesh, g.triangles, target.piece.source ?? target.piece)) positions.push(v);
+        }
         face.geometry.dispose();
-        face.geometry = faceGeometry(target.mesh, target.triangles, target.piece);
-        face.visible = true;
+        face.geometry = new THREE.BufferGeometry();
+        face.geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        face.visible = positions.length > 0;
       }
       const centre = new THREE.Vector3(
         (target.piece.box.min.x + target.piece.box.max.x) / 2,
@@ -486,17 +502,32 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
   function pieceTarget(id) {
     const piece = state.pieces.find((p) => p.id === id);
     if (!piece) return null;
-    // The mesh that holds most of the piece, not merely the first that grazes it: "touching"
-    // is a loose test, and a neighbouring material brushing the box would otherwise win and
-    // light up a sliver of itself instead of the piece.
+
+    // The piece's own triangles, from its faces: exact, and naturally spread across whatever
+    // meshes its materials live in. A piece spanning wood and glass highlights as both.
+    const byMesh = state.pieceTriangles?.get(piece);
+    const groups = byMesh
+      ? [...byMesh.entries()].filter(([, t]) => t.length).map(([mesh, triangles]) => ({ mesh, triangles }))
+      : [];
+    if (groups.length) return { type: 'part', piece, groups, ...primary(groups) };
+
+    // No face claimed anything — a shape the face model does not describe yet. Fall back to
+    // the box test on the mesh holding most of it, so the piece still lights up.
     let best = null;
     for (const mesh of state.meshes ?? []) {
       const triangles = trianglesTouchingBox(mesh, piece.source ?? piece);
-      if (!best || triangles.length > best.triangles.length) {
-        best = { type: 'part', piece, mesh, triangles };
-      }
+      if (!best || triangles.length > best.triangles.length) best = { mesh, triangles };
     }
-    return best?.triangles.length ? best : { type: 'part', piece };
+    return best?.triangles.length
+      ? { type: 'part', piece, groups: [best], mesh: best.mesh, triangles: best.triangles }
+      : { type: 'part', piece, groups: [] };
+  }
+
+  /// The largest group, kept on the target as `mesh`/`triangles` for the code paths that still
+  /// think of a piece as living in one mesh.
+  function primary(groups) {
+    const top = groups.reduce((a, b) => (b.triangles.length > a.triangles.length ? b : a));
+    return { mesh: top.mesh, triangles: top.triangles };
   }
 
   /// Highlights pieces named from outside — the parts list pointing at a row, which may be a
@@ -542,8 +573,8 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
       for (let i = 0; i < outline.length; i += 3) {
         points.push(new THREE.Vector3(outline[i], outline[i + 1], outline[i + 2]));
       }
-      if (target.triangles?.length) {
-        for (const v of clipToBox(target.mesh, target.triangles, target.piece.source ?? target.piece)) {
+      for (const g of target.groups ?? []) {
+        for (const v of clipToBox(g.mesh, g.triangles, target.piece.source ?? target.piece)) {
           positions.push(v);
         }
       }
@@ -751,6 +782,21 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     return segments;
   };
 
+  const pieceCoverage = () => state.pieces.map((piece) => {
+    const byMesh = state.pieceTriangles?.get(piece);
+    const fromFaces = byMesh ? [...byMesh.values()].reduce((n, t) => n + t.length, 0) : 0;
+    const meshes = byMesh ? [...byMesh.values()].filter((t) => t.length).length : 0;
+    // Two yardsticks. "Touching" is inflated by neighbours brushing the box, so a ratio against
+    // it says little; "wholly inside" is certainly the piece's own, so faces must cover at least
+    // that or something is missing.
+    let touching = 0, inside = 0;
+    for (const mesh of state.meshes) {
+      touching = Math.max(touching, trianglesTouchingBox(mesh, piece.source ?? piece).length);
+      inside = Math.max(inside, trianglesInBox(mesh, piece.source ?? piece).length);
+    }
+    return { id: piece.id, faces: fromFaces, meshes, box: touching, inside };
+  });
+
   const debug = () => ({
     lastEvent,
     hovered: hovered ? {
@@ -796,8 +842,9 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     sweep: Math.round(f.sweep * 180 / Math.PI * 10) / 10,
     segments: f.segments.length,
     centre: [f.centre.x, f.centre.y, f.centre.z].map((v) => Math.round(v)),
+    points: f.points.map((q) => [q.x, q.y, q.z].map((v) => Math.round(v))),
   }));
 
-  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, arcPoint, selection, highlightPiece, highlightPieces, selectPiece, features, longestFeature, edgesInPiece,
+  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, arcPoint, selection, highlightPiece, highlightPieces, selectPiece, features, longestFeature, edgesInPiece, pieceCoverage,
            clear, update };
 }

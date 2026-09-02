@@ -382,9 +382,14 @@ extension CSGSplitter {
         guard let height = numbers["height"], height > 0 else { return nil }
         let centered = node.args.contains("center = true")
 
-        var shape: (min: [Double], max: [Double])?
-        for child in node.children {
-            shape = union(shape, shape2D(child, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]))
+        // The outline, when there is one, bounds the shape exactly; the extents are only an
+        // upper bound (an intersection can be much smaller than the overlap of its operands).
+        let points = profile(of: node)
+        var shape: (min: [Double], max: [Double])? = points.flatMap { transformed($0, identity) }
+        if shape == nil {
+            for child in node.children {
+                shape = union(shape, shape2D(child, identity))
+            }
         }
         guard let shape, shape.max[0] > shape.min[0], shape.max[1] > shape.min[1] else { return nil }
 
@@ -397,14 +402,14 @@ extension CSGSplitter {
                       size: [shape.max[0] - shape.min[0], shape.max[1] - shape.min[1], height],
                       centered: false)
         // Into the box's own coordinates, which is where the viewer builds its edges.
-        let outline = profile(of: node)?.map { [$0[0] - shape.min[0], $0[1] - shape.min[1]] }
+        let outline = points?.map { [$0[0] - shape.min[0], $0[1] - shape.min[1]] }
         return (box, outline)
     }
 
     /// The extruded outline, in the box's own coordinates, when the profile is a single shape.
     ///
-    /// Only then: an `intersection` of several 2D shapes has an outline this cannot describe,
-    /// and a wrong outline is worse than falling back to the box.
+    /// Only then: two disjoint shapes under one extrude have no single outline, and a wrong
+    /// outline is worse than falling back to the box.
     private static func profile(of node: Node) -> [[Double]]? {
         var found: [[Double]]?
         var shapes = 0
@@ -450,8 +455,7 @@ extension CSGSplitter {
             guard let r = named(in: node.args)["r"], r > 0 else { return nil }
             // Same vertex count OpenSCAD used, so the outline sits on the mesh rather than
             // just near it.
-            let sides = Int(named(in: node.args)["$fn"] ?? 0)
-            let n = sides >= 3 ? sides : 32
+            let n = fragments(r, named(in: node.args))
             return place((0..<n).map { i in
                 let a = 2 * Double.pi * Double(i) / Double(n)
                 return [r * cos(a), r * sin(a)]
@@ -466,10 +470,30 @@ extension CSGSplitter {
             return all.count >= 3 ? convexHull(all) : nil
 
         case "offset":
-            // The delta is ignored: in practice it is zero here, and insetting a polygon
-            // properly is a different job from reading its shape.
-            guard node.children.count == 1 else { return nil }
-            return outline(of: node.children[0], current)
+            // `delta` moves every edge along its normal and keeps corners sharp, which is exactly
+            // the edge-shift construction below. `r` rounds the corners it opens up: on a convex
+            // shape a negative `r` opens none, so the same construction is exact; a positive one
+            // would need arcs, and the box is more honest than sharp corners in their place.
+            guard node.children.count == 1, let pts = outline(of: node.children[0], current) else { return nil }
+            let numbers = named(in: node.args)
+            if let delta = numbers["delta"] { return delta == 0 ? pts : inset(pts, by: delta) }
+            if let r = numbers["r"] {
+                if r == 0 { return pts }
+                guard isConvex(pts) else { return nil }
+                return r < 0 ? inset(pts, by: r) : rounded(pts, by: r, fragments: fragments(r, numbers))
+            }
+            return pts
+
+        case "intersection":
+            // Clipping one polygon by another is exact when the clip is convex; it is wrong in
+            // subtle ways when it is not, and a wrong outline is worse than falling back to the
+            // box. So every operand has to be convex — which the rounded plans in practice are.
+            var result: [[Double]]?
+            for child in node.children {
+                guard let pts = outline(of: child, current), isConvex(pts) else { return nil }
+                result = result.map { clip($0, to: pts) } ?? pts
+            }
+            return (result?.count ?? 0) >= 3 ? result : nil
 
         // multmatrix belongs here too: it is a wrapper like the rest, and leaving it out sent
         // every transformed shape — every circle inside a hull — to the default nil.
@@ -478,7 +502,133 @@ extension CSGSplitter {
             return node.children.count == 1 ? shapes.first : (shapes.count == 1 ? shapes[0] : nil)
 
         default:
-            return nil          // intersection, difference: no single outline to draw
+            return nil          // difference: no single outline to draw
+        }
+    }
+
+    /// How many segments OpenSCAD gives a full circle of radius `r` — `$fn` when set, otherwise
+    /// the coarser of `$fa` and `$fs`, never fewer than five. Arcs from `offset(r)` use the
+    /// same count, so an outline built with it lands on the mesh's own vertices.
+    private static func fragments(_ r: Double, _ numbers: [String: Double]) -> Int {
+        if let fn = numbers["$fn"], fn > 0 { return Swift.max(Int(fn), 3) }
+        let fa = numbers["$fa"] ?? 12, fs = numbers["$fs"] ?? 2
+        return Int(ceil(Swift.max(Swift.min(360 / fa, r * 2 * Double.pi / fs), 5)))
+    }
+
+    /// Every edge moved outward by `r` and every corner replaced by an arc about the original
+    /// vertex — OpenSCAD's `offset(r)` on a convex shape. Arc steps are the full circle's
+    /// `fragments`, starting from the incoming edge's normal, which is how Clipper walks them.
+    private static func rounded(_ points: [[Double]], by r: Double, fragments: Int) -> [[Double]] {
+        let pts = ccw(points)
+        let n = pts.count
+        guard n >= 3 else { return pts }
+        let step = 2 * Double.pi / Double(fragments)
+        var out: [[Double]] = []
+        for i in 0..<n {
+            let prev = pts[(i + n - 1) % n], v = pts[i], next = pts[(i + 1) % n]
+            let from = atan2(-(v[0] - prev[0]), v[1] - prev[1])       // outward normal of the edge in
+            var to = atan2(-(next[0] - v[0]), next[1] - v[1])         // and of the edge out
+            while to < from - 1e-9 { to += 2 * Double.pi }
+            let sweep = to - from
+            let steps = Int((sweep / step).rounded())
+            for k in 0...Swift.max(steps, 0) {
+                let a = steps == 0 ? from : from + sweep * Double(k) / Double(steps)
+                let p = [v[0] + r * cos(a), v[1] + r * sin(a)]
+                if let last = out.last, abs(last[0] - p[0]) < 1e-9, abs(last[1] - p[1]) < 1e-9 { continue }
+                out.append(p)
+            }
+        }
+        if out.count > 1, let f = out.first, let l = out.last,
+           abs(f[0] - l[0]) < 1e-9, abs(f[1] - l[1]) < 1e-9 { out.removeLast() }
+        return out
+    }
+
+    private static func signedArea(_ pts: [[Double]]) -> Double {
+        var area = 0.0
+        for i in pts.indices {
+            let a = pts[i], b = pts[(i + 1) % pts.count]
+            area += a[0] * b[1] - b[0] * a[1]
+        }
+        return area / 2
+    }
+
+    /// Counter-clockwise, whichever way the source wound it.
+    private static func ccw(_ pts: [[Double]]) -> [[Double]] {
+        signedArea(pts) < 0 ? pts.reversed() : pts
+    }
+
+    /// Every turn the same way, allowing for the straight runs a sampled arc produces.
+    private static func isConvex(_ points: [[Double]]) -> Bool {
+        let pts = ccw(points)
+        guard pts.count >= 3 else { return false }
+        for i in pts.indices {
+            let o = pts[i], a = pts[(i + 1) % pts.count], b = pts[(i + 2) % pts.count]
+            let turn = (a[0] - o[0]) * (b[1] - a[1]) - (a[1] - o[1]) * (b[0] - a[0])
+            if turn < -1e-6 { return false }
+        }
+        return true
+    }
+
+    /// Sutherland–Hodgman: `subject` cut down to what lies inside the convex `window`.
+    private static func clip(_ subject: [[Double]], to window: [[Double]]) -> [[Double]] {
+        var output = subject
+        let w = ccw(window)
+        for i in w.indices {
+            let a = w[i], b = w[(i + 1) % w.count]
+            let input = output
+            output = []
+            guard !input.isEmpty else { break }
+            func inside(_ p: [Double]) -> Bool {
+                (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) >= -1e-9
+            }
+            func cross(_ p: [Double], _ q: [Double]) -> [Double] {
+                let d = [q[0] - p[0], q[1] - p[1]], e = [b[0] - a[0], b[1] - a[1]]
+                let denom = d[0] * e[1] - d[1] * e[0]
+                guard abs(denom) > 1e-12 else { return p }
+                let t = ((a[0] - p[0]) * e[1] - (a[1] - p[1]) * e[0]) / denom
+                return [p[0] + d[0] * t, p[1] + d[1] * t]
+            }
+            var previous = input[input.count - 1]
+            for point in input {
+                if inside(point) {
+                    if !inside(previous) { output.append(cross(previous, point)) }
+                    output.append(point)
+                } else if inside(previous) {
+                    output.append(cross(previous, point))
+                }
+                previous = point
+            }
+        }
+        // Clipping leaves duplicate vertices where an edge ends exactly on the window.
+        var cleaned: [[Double]] = []
+        for p in output where cleaned.last.map({ abs($0[0] - p[0]) > 1e-6 || abs($0[1] - p[1]) > 1e-6 }) ?? true {
+            cleaned.append(p)
+        }
+        if cleaned.count > 1, let f = cleaned.first, let l = cleaned.last,
+           abs(f[0] - l[0]) <= 1e-6, abs(f[1] - l[1]) <= 1e-6 { cleaned.removeLast() }
+        return cleaned
+    }
+
+    /// Every edge moved outward by `delta` (inward when negative), corners where the moved
+    /// edges meet — OpenSCAD's `offset(delta)`.
+    private static func inset(_ points: [[Double]], by delta: Double) -> [[Double]] {
+        let pts = ccw(points)
+        let n = pts.count
+        guard n >= 3 else { return pts }
+        // Edge i runs from pts[i] to pts[i+1]; its outward normal on a CCW polygon points right.
+        let shifted: [(p: [Double], d: [Double])] = (0..<n).map { i in
+            let a = pts[i], b = pts[(i + 1) % n]
+            let d = [b[0] - a[0], b[1] - a[1]]
+            let len = max(1e-12, (d[0] * d[0] + d[1] * d[1]).squareRoot())
+            let normal = [d[1] / len, -d[0] / len]
+            return ([a[0] + normal[0] * delta, a[1] + normal[1] * delta], d)
+        }
+        return (0..<n).map { i in
+            let prev = shifted[(i + n - 1) % n], next = shifted[i]
+            let denom = prev.d[0] * next.d[1] - prev.d[1] * next.d[0]
+            guard abs(denom) > 1e-12 else { return next.p }      // parallel: the shift itself
+            let t = ((next.p[0] - prev.p[0]) * next.d[1] - (next.p[1] - prev.p[1]) * next.d[0]) / denom
+            return [prev.p[0] + prev.d[0] * t, prev.p[1] + prev.d[1] * t]
         }
     }
 

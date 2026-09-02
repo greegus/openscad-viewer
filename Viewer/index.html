@@ -1024,6 +1024,79 @@ window.debug = {
   /// empty air is cutter geometry leaking into the drawing, not an edge of the piece.
   /// Pieces whose triangles fall in more than one material mesh: the case where "the mesh the
   /// ray hit" and "the mesh holding most of the piece" can disagree.
+  /// For every piece: triangles its faces claimed versus what the box test would take from the
+  /// mesh holding most of it. Faces should cover the piece without borrowing from neighbours.
+  /// Each face of a piece with the world-space extent of the triangles it claimed and its
+  /// normal — to tell "the piece's own side" from "the wall it butts into".
+  faceExtents: (id) => {
+    const piece = pieceModel.find((p) => p.id === id);
+    if (!piece) return null;
+    const faces = pieceFaces(piece);
+    const out = [];
+    for (const part of parts) {
+      const groups = assignTriangles(part.mesh, faces, trianglesTouchingBox(part.mesh, piece.source ?? piece));
+      const pos = part.mesh.geometry.attributes.position;
+      const v = new THREE.Vector3();
+      for (const [f, tris] of groups) {
+        if (!tris.length) continue;
+        const box = new THREE.Box3();
+        for (const t of tris) for (let k = 0; k < 3; k++) {
+          box.expandByPoint(v.fromBufferAttribute(pos, t * 3 + k).applyMatrix4(part.mesh.matrixWorld));
+        }
+        const size = box.getSize(new THREE.Vector3());
+        out.push({ label: f.label, inward: f.inward, tris: tris.length,
+                   extent: [size.x, size.y, size.z].map(Math.round),
+                   normal: f.normal ? [f.normal.x, f.normal.y, f.normal.z].map((n) => +n.toFixed(2)) : null });
+      }
+    }
+    return out;
+  },
+  pieceCoverage: () => inspect?.pieceCoverage() ?? null,
+  claimedBy: (id, match) => {
+    const piece = pieceModel.find((p) => p.id === id);
+    if (!piece) return null;
+    const faces = pieceFaces(piece);
+    const face = faces.find(match);
+    if (!face) return null;
+    const out = [];
+    for (const part of parts) {
+      const tris = assignTriangles(part.mesh, faces, trianglesInBox(part.mesh, piece.source ?? piece)).get(face) ?? [];
+      const pos = part.mesh.geometry.attributes.position;
+      const v = new THREE.Vector3();
+      for (const t of tris) out.push([0, 1, 2].map((k) => { v.fromBufferAttribute(pos, t * 3 + k).applyMatrix4(part.mesh.matrixWorld); return [v.x, v.y, v.z].map((q) => +q.toFixed(2)); }));
+    }
+    return out;
+  },
+  /// Triangles wholly inside a piece's box that none of its faces claimed: normal and centroid
+  /// relative to the box (0..1 per axis) tell whether they are its own or a neighbour's.
+  unclaimed: (id) => {
+    const piece = pieceModel.find((p) => p.id === id);
+    if (!piece) return null;
+    const faces = pieceFaces(piece);
+    const out = { faces: faces.map((f) => f.label), perMesh: [], rows: [] };
+    for (const part of parts) {
+      const inside = trianglesInBox(part.mesh, piece.source ?? piece);
+      const groups = assignTriangles(part.mesh, faces, inside);
+      const taken = new Set();
+      for (const tris of groups.values()) for (const t of tris) taken.add(t);
+      out.perMesh.push({ inside: inside.length, taken: taken.size });
+      const pos = part.mesh.geometry.attributes.position;
+      const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+      const lo = piece.box.min, hi = piece.box.max;
+      for (const t of inside) {
+        if (taken.has(t)) continue;
+        a.fromBufferAttribute(pos, t * 3).applyMatrix4(part.mesh.matrixWorld);
+        b.fromBufferAttribute(pos, t * 3 + 1).applyMatrix4(part.mesh.matrixWorld);
+        c.fromBufferAttribute(pos, t * 3 + 2).applyMatrix4(part.mesh.matrixWorld);
+        const n = b.clone().sub(a).cross(c.clone().sub(a)).normalize();
+        const m = a.clone().add(b).add(c).divideScalar(3).applyMatrix4(piece.inverse);
+        const rel = m.clone().sub(lo).divide(hi.clone().sub(lo).max(new THREE.Vector3(1e-6, 1e-6, 1e-6)));
+        out.rows.push({ mesh: parts.indexOf(part), n: [n.x, n.y, n.z].map((v) => +v.toFixed(2)), at: [rel.x, rel.y, rel.z].map((v) => +v.toFixed(2)),
+                       v: [a, b, c].map((q) => [q.x, q.y, q.z].map((v) => +v.toFixed(2))) });
+      }
+    }
+    return out;
+  },
   multiMaterial: () => {
     const out = [];
     for (const piece of pieceModel) {
@@ -1070,9 +1143,13 @@ window.debug = {
     const piece = pieceModel.find((p) => p.id === id);
     if (!piece) return null;
     const faces = pieceFaces(piece);
-    const counts = parts.map((part) => assignTriangles(part.mesh, faces));
+    // Candidates as the picker uses them; without any, the scan is a different measurement.
+    const counts = parts.map((part) => assignTriangles(part.mesh, faces, trianglesTouchingBox(part.mesh, piece.source ?? piece)));
     return faces.map((f, i) => ({
       kind: f.kind, label: f.label, radius: f.radius ? Math.round(f.radius) : undefined,
+      inward: f.inward, normal: f.normal ? [f.normal.x, f.normal.y, f.normal.z].map((v) => +v.toFixed(2)) : undefined,
+      axis: f.axis ? [f.axis.x, f.axis.y, f.axis.z].map((v) => +v.toFixed(2)) : undefined,
+      point: f.point ? [f.point.x, f.point.y, f.point.z].map((v) => +v.toFixed(1)) : undefined,
       triangles: counts.reduce((n, m) => n + (m.get(f)?.length ?? 0), 0),
     }));
   },

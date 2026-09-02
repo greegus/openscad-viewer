@@ -159,10 +159,29 @@ wall. Two tangent lines crossing on one face drew a star of wall-coloured strips
 middle of the cut. The more specific surface has to win, and every vertex is tested rather than
 the centroid, which on a curve is pulled inside and looks flatter than the facet is.
 
-The mesh is then asked only which triangles cover each face, matched by position and orientation;
-a triangle matching none is left out rather than guessed at. Sides are split on the same turn
-threshold the edges use, so a face and the edge bounding it always agree on where the curve
-begins. Measured on `Tests/cylinder.scad`: six planes and two cylinders account for all 1152
+The mesh is then asked only which triangles cover each face, matched by position and orientation
+**and bounded by the piece**: a shelf's end and the wall it stops against share a plane and a
+normal, and only the fact that the shelf's end lies within the shelf tells them apart. A triangle
+matching none is left out rather than guessed at.
+
+Where a curve begins is decided the same way for faces and for edges, and the rule took three
+corrections to get right. A vertex turning under 1.5° is tessellation noise on a straight side;
+one turning 30° or more is a corner — without that class a shelf with one rounded corner and
+three sharp ones fitted a single arc of radius 454 through its whole outline. In between is a step
+of an arc, but only if the segment is as long as a neighbouring step, because OpenSCAD samples
+arcs in equal steps: the flat between two rounded corners meets each arc at a tangent, so both
+its ends turn gently, and by turns alone two arcs and a 287 mm flat fused into one arc of radius
+642. Finally an arc that ends in a corner keeps its first and last step, which the vertex rule
+alone would shed as stray one-step sides — a step beside an arc whose far end lies on the arc's
+circle belongs to it. A drilled hole is a run round the whole outline and is fitted from three
+points a third of the way round, since its two ends are the same point.
+
+The outline itself is read from the 2D tree: `polygon`, `square`, `circle`, `hull`, `offset`
+(`delta`, and `r` on a convex shape — inward as moved edges, outward as edges plus arcs sampled
+with the same fragment count OpenSCAD uses, so the outline lands on the mesh's vertices) and the
+`intersection` of convex shapes, by clipping. Anything else falls back to the box, since a wrong
+outline is worse than a coarse one. `offset(r = 30) offset(r = -30) square(...)` — the usual way
+to round all four corners — gives a 100-point outline whose four arcs claim 48 triangles each. Measured on `Tests/cylinder.scad`: six planes and two cylinders account for all 1152
 triangles with none left over, and the wall of a hole reads as one face of 368 triangles.
 
 A shaped cut is clipped against its **prism**, not its bounding box, and contributes the rim it
@@ -251,9 +270,9 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
   - A rounded board is drawn as its actual **profile**, not as its bounding box: the profile at
     top and bottom, joined by verticals only where it genuinely turns. A tessellated arc is a
     smooth surface with no edges along it, so joining every point would fence every rounded
-    corner in. Only when the profile is a single shape — an `intersection` of several has an
-    outline this cannot describe, and a wrong outline is worse than falling back to the box.
-    Note `merged()` must leave these alone: it rebuilds components as bare boxes, which threw
+    corner in. Only when the profile is a single shape — two disjoint shapes under one extrude
+    have no single outline, and a wrong outline is worse than falling back to the box. Note
+    `merged()` must leave these alone: it rebuilds components as bare boxes, which threw
     the profile away and put the square corners straight back.
   - Boards with a rounded corner are `linear_extrude`, not cubes, and used to have no piece at
     all — the Parts overlay skipped them and holding the modifier fell through to "the whole

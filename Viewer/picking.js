@@ -180,15 +180,20 @@ export function pieceFaces(piece) {
   const source = piece.source ?? {};
   const toWorld = piece.world;
 
-  const plane = (p0, n, label, tag = null) => faces.push({
-    kind: 'plane', label, tag,
+  // `inward` says which way the surface faces on the finished piece. A piece's own faces look
+  // out; a cut's faces look into the hole it left. The mesh's triangles agree with that, so
+  // matching on the *signed* normal tells a piece's side apart from the wall it butts against —
+  // the two share a plane with opposite normals, and an unsigned test took the wall's 322
+  // triangles for the shelf's side.
+  const plane = (p0, n, label, tag = null, inward = false) => faces.push({
+    kind: 'plane', label, tag, inward,
     point: p0.clone().applyMatrix4(toWorld),
     normal: n.clone().transformDirection(toWorld).normalize(),
     piece,
     dividers: [],       // tangent lines lying in this face, which split it — see below
   });
-  const cylinder = (p0, axis, radius, label) => faces.push({
-    kind: 'cylinder', label, radius,
+  const cylinder = (p0, axis, radius, label, inward = false) => faces.push({
+    kind: 'cylinder', label, radius, inward,
     point: p0.clone().applyMatrix4(toWorld),
     axis: axis.clone().transformDirection(toWorld).normalize(),
     piece,
@@ -233,8 +238,8 @@ export function pieceFaces(piece) {
       .multiply(box.matrix);
     const place = (v) => v.clone().applyMatrix4(cutToPiece);
     const dir = (v) => v.clone().transformDirection(cutToPiece);
-    addSurfaces(cut, box, (p0, n, label) => plane(place(p0), dir(n), label),
-                (p0, axis, radius, label) => cylinder(place(p0), dir(axis), radius, label),
+    addSurfaces(cut, box, (p0, n, label) => plane(place(p0), dir(n), label, null, true),
+                (p0, axis, radius, label) => cylinder(place(p0), dir(axis), radius, label, true),
                 'cut ');
   }
   return faces;
@@ -259,41 +264,98 @@ function addSurfaces(source, box, plane, cylinder, prefix) {
   plane(new THREE.Vector3(0, 0, max.z), new THREE.Vector3(0, 0, 1), prefix + 'top');
 
   // The side, run by run: a straight stretch of profile is one plane, a curved stretch one
-  // cylinder. Splitting on the same turn threshold the features use, so a face and the edge
-  // bounding it always agree on where the curve begins.
+  // cylinder. Three kinds of vertex, not two: a turn under 1.5° is tessellation noise on a
+  // straight side, a turn up to 30° is a step along a tessellated arc, and anything sharper is
+  // a corner. With only the first two, a 90° corner counted as "curved" and a shelf with one
+  // rounded corner and three sharp ones became a single arc through the whole outline — a
+  // cylinder of radius 454 that nothing in the mesh could match, and no side faces at all.
   const profile = source.profile.map(([x, y]) => new THREE.Vector2(x, y));
   const n = profile.length;
+  const STRAIGHT = 1.5 * Math.PI / 180;
+  const CORNER = 30 * Math.PI / 180;
   const turn = (i) => {
-    const a = profile[(i - 1 + n) % n], b = profile[i], c = profile[(i + 1) % n];
+    const a = profile[(i - 1 + n) % n], b = profile[i % n], c = profile[(i + 1) % n];
     const u = b.clone().sub(a).normalize();
     const v = c.clone().sub(b).normalize();
     return Math.acos(Math.max(-1, Math.min(1, u.dot(v))));
   };
-  const STRAIGHT = 1.5 * Math.PI / 180;
+  const kind = (i) => { const t = turn(i); return t < STRAIGHT ? 0 : t < CORNER ? 1 : 2; };
 
-  let i = 0;
-  while (i < n) {
-    const curved = turn(i) > STRAIGHT;
-    let j = i;
-    while (j + 1 < n && (turn(j + 1) > STRAIGHT) === curved) j++;
+  // Edges, grouped into runs. An edge is on an arc when both its ends are arc vertices *and* it
+  // is a step of that arc — as long as a neighbouring step, since a sampled arc has equal steps.
+  // Vertex kinds alone are not enough: the flat between two rounded corners meets each arc at a
+  // tangent, so both its ends look like arc vertices, and the two arcs and the flat fused into
+  // one "arc" — a handle cut with a radius of 642 mm. Straight edges merge only across a
+  // straight vertex, so a corner always starts a new side.
+  const length = (i) => profile[i % n].distanceTo(profile[(i + 1) % n]);
+  const similar = (a, b) => Math.abs(a - b) <= 0.2 * Math.max(a, b);
+  const step = (i) => similar(length(i), length(i - 1 + n)) || similar(length(i), length(i + 1));
+  const runs = [];
+  let current = null;
+  for (let i = 0; i < n; i++) {
+    const curved = kind(i) === 1 && kind(i + 1) === 1 && step(i);
+    const joins = current && current.curved === curved && (curved || kind(i) === 0);
+    if (joins) current.end = i + 1;
+    else { if (current) runs.push(current); current = { start: i, end: i + 1, curved }; }
+  }
+  if (current) runs.push(current);
 
-    if (curved) {
-      const a = profile[i], b = profile[Math.floor((i + j) / 2)], c = profile[j];
-      const fit = circleThrough2D(a, b, c);
+  // An arc that ends in a corner loses its first and last step to the rule above: the corner
+  // vertex is not an arc vertex, so the step beside it is not "between two arc vertices" and
+  // becomes a stray one-step side. The circle settles it: a single step next to an arc whose
+  // far end lies on the arc's circle is part of the arc.
+  const at = (i) => profile[((i % n) + n) % n];    // runs may wrap past either end once merged
+  // A run round the whole profile — a drilled hole — ends where it starts, so its ends cannot
+  // both be fit points; three points a third of the way round each are.
+  const fitOf = (run) => {
+    const span = run.end - run.start;
+    if (span >= n) return circleThrough2D(at(run.start), at(run.start + Math.floor(n / 3)), at(run.start + Math.floor(2 * n / 3)));
+    return circleThrough2D(at(run.start), at(Math.floor((run.start + run.end) / 2)), at(run.end));
+  };
+  const onCircle = (fit, p) => Math.abs(p.distanceTo(fit.centre) - fit.radius) <= Math.max(0.05, fit.radius * 1e-3);
+  for (let r = 0; r < runs.length && runs.length > 1; r++) {
+    const run = runs[r];
+    if (!run.curved) continue;
+    const fit = fitOf(run);
+    if (!fit) continue;
+    const before = runs[(r - 1 + runs.length) % runs.length];
+    if (!before.curved && before.end - before.start === 1 && onCircle(fit, at(before.start))) {
+      run.start = before.start - (r === 0 ? n : 0);
+      runs.splice(runs.indexOf(before), 1);
+      if (runs.indexOf(run) < r) r--;
+    }
+    const after = runs[(runs.indexOf(run) + 1) % runs.length];
+    if (after !== run && !after.curved && after.end - after.start === 1 && onCircle(fit, at(after.end))) {
+      run.end = after.end + (runs.indexOf(after) === 0 ? n : 0);
+      runs.splice(runs.indexOf(after), 1);
+      r = runs.indexOf(run);
+    }
+  }
+
+  for (const run of runs) {
+    const a = at(run.start);
+    const b = at(run.end);
+    if (run.curved) {
+      const fit = fitOf(run);
       if (fit) {
         cylinder(new THREE.Vector3(fit.centre.x, fit.centre.y, min.z),
                  new THREE.Vector3(0, 0, 1), fit.radius, prefix + 'round side');
       }
     } else {
-      const a = profile[i], b = profile[(j + 1) % n];
       const edge = b.clone().sub(a);
       if (edge.lengthSq() > 1e-12) {
-        const outward = new THREE.Vector2(edge.y, -edge.x).normalize();
+        // Outward is settled against the box's own centre, not inferred from winding or from
+        // the matrix: a corner shelf built with mirror() has a matrix of negative determinant,
+        // which turns a normal that was outward in the profile into one pointing inward once
+        // placed — and the shelf's ends then matched the cabinet wall they butt against.
+        let outward = new THREE.Vector2(edge.y, -edge.x).normalize();
+        const centre = new THREE.Vector2((min.x + max.x) / 2, (min.y + max.y) / 2);
+        const mid = a.clone().add(b).multiplyScalar(0.5);
+        if (mid.sub(centre).dot(outward) < 0) outward.negate();
         plane(new THREE.Vector3(a.x, a.y, min.z),
               new THREE.Vector3(outward.x, outward.y, 0), prefix + 'side');
       }
     }
-    i = j + 1;
   }
 }
 
@@ -345,6 +407,9 @@ export function assignTriangles(mesh, faces, candidates = null) {
   // middle of the cut. The more specific surface has to win.
   const ordered = [...faces].sort((a, b) => (a.kind === 'cylinder' ? -1 : 0) - (b.kind === 'cylinder' ? -1 : 0));
 
+  const local = new THREE.Vector3();
+  const slack = 0.5;
+
   for (const t of indices) {
     a.fromBufferAttribute(position, t * 3).applyMatrix4(mesh.matrixWorld);
     b.fromBufferAttribute(position, t * 3 + 1).applyMatrix4(mesh.matrixWorld);
@@ -355,18 +420,36 @@ export function assignTriangles(mesh, faces, candidates = null) {
     normal.normalize();
 
     for (const face of ordered) {
+      // A face has a boundary as well as a surface. A shelf's end and the wall it stops against
+      // share a plane *and* a normal — the shelf ends where the wall begins — so neither the
+      // plane nor its sign can tell them apart. What can is extent: the shelf's end lies within
+      // the shelf. So the centroid must fall inside the owning piece's box, which is the one
+      // thing a neighbour's triangle on the same plane cannot manage.
+      const piece = face.piece;
+      if (piece?.inverse && piece.box) {
+        local.copy(centroid).applyMatrix4(piece.inverse);
+        const bx = piece.box;
+        if (local.x < bx.min.x - slack || local.x > bx.max.x + slack
+         || local.y < bx.min.y - slack || local.y > bx.max.y + slack
+         || local.z < bx.min.z - slack || local.z > bx.max.z + slack) continue;
+      }
+
       // Every vertex, not the centroid: a facet lying across a curve has its centroid pulled
       // inside, and on a tangent that is exactly what made it look like part of the plane.
       let fits = true;
       for (const p of [a, b, c]) {
+        const sign = face.inward ? -1 : 1;
         if (face.kind === 'plane') {
-          if (Math.abs(normal.dot(face.normal)) < 0.995) { fits = false; break; }
+          // Signed: a neighbour flush against this face shares the plane with the opposite normal.
+          if (normal.dot(face.normal) * sign < 0.995) { fits = false; break; }
           if (Math.abs(offset.copy(p).sub(face.point).dot(face.normal)) > 0.02) { fits = false; break; }
         } else {
           if (Math.abs(normal.dot(face.axis)) > 0.05) { fits = false; break; }
           offset.copy(p).sub(face.point);
           offset.addScaledVector(face.axis, -offset.dot(face.axis));
           if (Math.abs(offset.length() - face.radius) > 0.05) { fits = false; break; }
+          // Radial direction agrees too: a hole's wall faces its axis, a boss's faces away.
+          if (normal.dot(offset.normalize()) * sign < 0.5) { fits = false; break; }
         }
       }
       if (!fits) continue;
@@ -1193,6 +1276,7 @@ export function buildFeatures(edges) {
   // Below this a turn is just tessellation noise on a straight run. A genuine arc from
   // OpenSCAD turns by $fa (12° by default) per segment, so the gap is wide.
   const STRAIGHT = 1.5 * Math.PI / 180;
+  const CORNER = 30 * Math.PI / 180;
 
   const turnAt = (p, i) => {
     const u = p[i].clone().sub(p[i - 1]).normalize();
@@ -1203,36 +1287,49 @@ export function buildFeatures(edges) {
   for (const points of chains) {
     if (points.length === 2) { features.push(makeFeature(points, false)); continue; }
 
-    // turns[j] is the turn at point j+1, so a curved turn at j means point j+1 lies on the arc.
-    const turns = [];
-    for (let i = 1; i < points.length - 1; i++) turns.push(turnAt(points, i));
+    // Segments, not turns, are what lie on an arc. Segment k runs from point k to k+1; it is a
+    // step of an arc when the turn at each of its ends is a curved one (or the end is the end
+    // of the chain — a corner, which the chain already stopped at) and it is as long as a
+    // neighbouring step, because OpenSCAD samples an arc in equal steps. The length matters:
+    // the flat between two rounded corners meets each arc at a tangent, so the turns at both
+    // its ends are small but curved, and by turns alone the two arcs and the flat became one
+    // arc with a radius of 642 mm.
+    // A turn of 30° or more is a corner, never a step: three sides of a welded-in board, whose
+    // corners have no vertical edge to stop the chain, are as cocircular as any square's
+    // vertices and came out as an arc of radius 316.
+    const segments = points.length - 1;
+    const turnCurved = (i) => {
+      if (i <= 0 || i >= points.length - 1) return true;
+      const t = turnAt(points, i);
+      return t > STRAIGHT && t < CORNER;
+    };
+    const length = (k) => points[k].distanceTo(points[k + 1]);
+    const similar = (a, b) => Math.abs(a - b) <= 0.2 * Math.max(a, b);
+    const isStep = (k) => turnCurved(k) && turnCurved(k + 1)
+      && ((k > 0 && similar(length(k), length(k - 1))) || (k < segments - 1 && similar(length(k), length(k + 1))));
 
-    // Runs of consecutive turns with the same classification.
-    const runs = [];
-    let a = 0;
-    for (let j = 1; j <= turns.length; j++) {
-      if (j < turns.length && (turns[j] > STRAIGHT) === (turns[a] > STRAIGHT)) continue;
-      runs.push({ a, b: j - 1, curved: turns[a] > STRAIGHT });
-      a = j;
-    }
+    // Segments `from` up to `to` that are not arc steps: one straight edge per run between
+    // turns, since an edge ends at a vertex and any turn beyond tessellation noise is one.
+    const straight = (from, to) => {
+      let start = from;
+      for (let i = from + 1; i < to; i++) {
+        if (turnAt(points, i) > STRAIGHT) { features.push(makeFeature(points.slice(start, i + 1), false)); start = i; }
+      }
+      features.push(makeFeature(points.slice(start, to + 1), false));
+    };
 
-    // The points *on* the arc are the middle points of its curved turns: p[a+1] … p[b+1].
-    // Taking a wider slice pulls in a point from the straight run, which then fails the
-    // circle fit and used to leave a stray two-segment fragment at every transition.
     let cursor = 0;
-    for (const run of runs) {
-      if (!run.curved) continue;
-      // A run at either end of the chain reaches the chain's own end point: there is no straight
-      // stretch there for the circle fit to be protected from. Without this, an entirely curved
-      // chain shed its first and last segment as one-segment "lines" — a circle came out as an
-      // arc plus two stray stubs, and clicking the rim of a hole picked a stub.
-      const from = run.a === 0 ? 0 : run.a + 1;
-      const to = run.b === turns.length - 1 ? points.length - 1 : run.b + 1;
-      if (from > cursor) features.push(makeFeature(points.slice(cursor, from + 1), false));
-      features.push(makeFeature(points.slice(from, to + 1), true));
-      cursor = to;
+    let k = 0;
+    while (k < segments) {
+      if (!isStep(k)) { k++; continue; }
+      let to = k;
+      while (to + 1 < segments && isStep(to + 1)) to++;
+      if (k > cursor) straight(cursor, k);
+      features.push(makeFeature(points.slice(k, to + 2), true));
+      cursor = to + 1;
+      k = to + 1;
     }
-    if (cursor < points.length - 1) features.push(makeFeature(points.slice(cursor), false));
+    if (cursor < segments) straight(cursor, segments);
   }
 
   return mergeCircles(features.filter(Boolean));
