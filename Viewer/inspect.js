@@ -275,6 +275,11 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
 
   let anchor = null;
 
+  // Diagnostic: with fills off only the strokes are drawn, so a pixel comparison of two
+  // highlights measures their edges rather than the tint over the whole piece.
+  let fills = true;
+  const setFills = (on) => { fills = on; if (!on) { hoverFace.visible = false; selectFace.visible = false; } };
+
   function show(target, lines, face) {
     lines.visible = false;
     face.visible = false;
@@ -304,7 +309,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
         face.geometry.dispose();
         face.geometry = new THREE.BufferGeometry();
         face.geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-        face.visible = positions.length > 0;
+        face.visible = fills && positions.length > 0;
       }
       const centre = new THREE.Vector3(
         (target.piece.box.min.x + target.piece.box.max.x) / 2,
@@ -316,7 +321,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     // A face is limited to the piece it belongs to; a body is the whole solid by definition.
     face.geometry = faceGeometry(target.mesh, target.triangles,
                                  target.type === 'face' ? target.piece : null);
-    face.visible = true;
+    face.visible = fills;
     return target.point.clone();   // 'face' and 'body' are both triangle sets
   }
 
@@ -864,5 +869,5 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
   }));
 
   return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, arcPoint, selection, highlightPiece, highlightPieces, selectPiece, features, longestFeature, edgesInPiece, pieceCoverage, ellipses,
-           clear, update };
+           clear, update, setFills };
 }

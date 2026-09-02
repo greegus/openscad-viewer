@@ -465,6 +465,21 @@ window.
 
 ## Debugging
 
+**Checks.** `Tests/check.sh` measures the viewer rather than looking at it: it opens each test
+design in the real `ViewerViewController` headlessly (`Tests/probe.sh <file.scad> <probe.js>`
+compiles a small host around it and evaluates a JavaScript probe once the model is in) and
+asserts on what comes back — every triangle of the drilled cube claimed by a face, four full
+circles and two whole ellipses, the wedge's five faces and nine edges, the names in order. Run
+it with a design of your own as the argument for coverage, names and arc radii on that too.
+
+One check is on pixels, and it is there because of the one bug the buffers could not see: the
+hover stroke, first used on an edge as the pointer crosses the model, drew at most that one
+segment for the rest of its life — three r160 fixes an instanced geometry's maximum count the
+first time it is bound — while the selection stroke, first used on a whole piece, drew
+everything. The target, the points and the buffers were identical; the framebuffer was not.
+`highlightParity` hovers an edge, then the piece, then selects it, and compares the two sets
+of painted pixels with the fills off: 1.000 with the fix, 0.452 without.
+
 Failures inside a Quick Look extension are invisible — they surface only as
 "Extension … failed during preview of this document". So the extension logs to its own
 subsystem:

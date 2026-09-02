@@ -1195,6 +1195,82 @@ window.debug = {
     return n;
   },
   snapshot: () => { renderer.render(scene, view.camera); return canvas.toDataURL('image/png'); },
+  /// Regression check: hover and selection of one piece must paint the same pixels. Measured on
+  /// the framebuffer, not on the buffers — the one time they disagreed, the buffers were
+  /// identical and the GPU drew fewer segments for hover than it had been given. The hover
+  /// stroke is first used on an edge, as it is in real use, before the whole piece.
+  highlightParity: (id) => {
+    if (!inspect) return null;
+    const rect = canvas.getBoundingClientRect();
+    const grab = () => {
+      renderer.render(scene, view.camera);
+      const c = document.createElement('canvas');
+      c.width = canvas.width; c.height = canvas.height;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(canvas, 0, 0);
+      return ctx.getImageData(0, 0, c.width, c.height).data;
+    };
+    const changed = (base, img) => {
+      const mask = new Uint8Array(base.length / 4);
+      for (let i = 0, k = 0; i < base.length; i += 4, k++) {
+        if (Math.abs(base[i] - img[i]) + Math.abs(base[i + 1] - img[i + 1]) + Math.abs(base[i + 2] - img[i + 2]) > 24) mask[k] = 1;
+      }
+      return mask;
+    };
+    const event = (px, type, meta) => new PointerEvent(type, {
+      clientX: rect.left + px[0], clientY: rect.top + px[1], metaKey: meta, bubbles: true, pointerId: 1,
+    });
+    const away = [3, 3];
+    inspect.clear?.();
+    inspect.setFills(false);
+    canvas.dispatchEvent(event(away, 'pointermove', false));
+    const base = grab();
+
+    // A point on the piece: the centre of the largest face the picker knows for it.
+    const piece = pieceModel.find((p) => p.id === id);
+    if (!piece) return null;
+    const px = (() => {
+      const faces = pieceFaces(piece);
+      let best = null;
+      for (const part of parts) {
+        const groups = assignTriangles(part.mesh, faces, trianglesTouchingBox(part.mesh, piece.source ?? piece));
+        for (const [f, tris] of groups) if (tris.length && (!best || tris.length > best.tris.length)) best = { mesh: part.mesh, tris };
+      }
+      if (!best) return null;
+      // A triangle's centroid, projected; the first one that lands on screen.
+      const pos = best.mesh.geometry.attributes.position;
+      const v = new THREE.Vector3();
+      for (const t of best.tris) {
+        const c = new THREE.Vector3();
+        for (let k = 0; k < 3; k++) c.add(v.fromBufferAttribute(pos, t * 3 + k).applyMatrix4(best.mesh.matrixWorld));
+        c.divideScalar(3);
+        const ndc = c.project(view.camera);
+        if (Math.abs(ndc.x) < 0.95 && Math.abs(ndc.y) < 0.95) {
+          return [(ndc.x * 0.5 + 0.5) * rect.width, (-ndc.y * 0.5 + 0.5) * rect.height];
+        }
+      }
+      return null;
+    })();
+    if (!px) return { error: 'no point on screen for piece ' + id };
+
+    // History first: an edge, as the pointer crosses on its way to the piece.
+    const edge = inspect.longestFeature?.();
+    if (edge?.px) { canvas.dispatchEvent(event(edge.px, 'pointermove', false)); grab(); }
+
+    canvas.dispatchEvent(event(px, 'pointermove', true));
+    const hover = changed(base, grab());
+    canvas.dispatchEvent(event(px, 'pointerdown', true));
+    canvas.dispatchEvent(event(px, 'pointerup', true));
+    canvas.dispatchEvent(event(away, 'pointermove', false));
+    const select = changed(base, grab());
+    inspect.clear?.();
+    inspect.setFills(true);
+
+    let h = 0, s = 0, both = 0;
+    for (let k = 0; k < hover.length; k++) { h += hover[k]; s += select[k]; both += hover[k] & select[k]; }
+    const union = h + s - both;
+    return { id, px: px.map(Math.round), hoverPixels: h, selectPixels: s, overlap: union ? +(both / union).toFixed(3) : 1 };
+  },
   /// A piece's outline, in world space — straight from the model everything else uses.
   pieceOutline: (id) => pieceModel.find((p) => p.id === id)?.outline ?? [],
   section: () => section.debug,
