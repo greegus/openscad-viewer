@@ -770,6 +770,15 @@ export function pieceOutline(component) {
     }
   });
 
+  // And where two cuts meet each other. Each pair once, and clipped against neither of them:
+  // the curve lies on both surfaces, so either would clip it away entirely.
+  for (let i = 0; i < cutters.length; i++) {
+    for (let j = i + 1; j < cutters.length; j++) {
+      const rest = cutters.filter((_, k) => k !== i && k !== j);
+      emit(cutIntersectionEdges(cutters[i], cutters[j], box), rest);
+    }
+  }
+
   return points;
 }
 
@@ -784,6 +793,88 @@ function boxEdges(min, max, matrix) {
     [[0, 0, 0], [0, 0, 1]], [[1, 0, 0], [1, 0, 1]], [[1, 1, 0], [1, 1, 1]], [[0, 1, 0], [0, 1, 1]],
   ]) out.push([at(...f), at(...t)]);
   return out;
+}
+
+/// Where two shaped cuts meet each other inside the piece.
+///
+/// Two cylinders drilled through a cube meet along a curve, and that curve is a crease of the
+/// resulting solid — the mesh-crease reader found it for free, and reading edges from the CSG
+/// instead means it has to be reconstructed. It is not the rim of either cut, nor an edge of the
+/// piece: it belongs to the pair.
+///
+/// Sampled rather than solved. Each cut is a prism, so take the rulings of one — the straight
+/// lines through its profile points, along its axis — and clip each against the other prism. The
+/// ends of what survives lie on both surfaces at once, which is the definition of the curve.
+/// Following the profile in order threads those points into polylines. This works for any pair of
+/// prisms, so two crossing grooves get their intersection as readily as two cylinders.
+function cutIntersectionEdges(a, b, box) {
+  if (!a.profile || !b.profile) return [];
+
+  const aToB = new THREE.Matrix4().multiplyMatrices(b.inverse, a.matrix);
+  const entering = [];
+  const leaving = [];
+
+  for (const [px, py] of a.profile) {
+    // The ruling as a segment spanning the cut's depth, taken into the other cut's space.
+    const p = new THREE.Vector3(px, py, a.min.z).applyMatrix4(aToB);
+    const q = new THREE.Vector3(px, py, a.max.z).applyMatrix4(aToB);
+    const span = clipToPrism(p, q, b);
+    if (!span) { entering.push(null); leaving.push(null); continue; }
+
+    // Back into the piece's coordinates, where every other edge lives.
+    const low = new THREE.Vector3(px, py, a.min.z + (a.max.z - a.min.z) * span[0]);
+    const high = new THREE.Vector3(px, py, a.min.z + (a.max.z - a.min.z) * span[1]);
+    entering.push(low.applyMatrix4(a.toPiece));
+    leaving.push(high.applyMatrix4(a.toPiece));
+  }
+
+  const edges = [];
+  for (const curve of [entering, leaving]) {
+    for (let i = 0; i < curve.length; i++) {
+      const from = curve[i];
+      const to = curve[(i + 1) % curve.length];
+      // A gap means the ruling missed the other cut; the curve simply is not there.
+      if (!from || !to) continue;
+      if (from.distanceTo(to) < 1e-6) continue;
+      edges.push([from, to]);
+    }
+  }
+  return edges;
+}
+
+/// The part of segment p→q inside a prism, as [t0, t1] in the segment's own parameter, or null.
+/// Depth first, then one half-plane per profile edge; the profile is convex here.
+function clipToPrism(p, q, prism) {
+  const d = q.clone().sub(p);
+  const eps = 1e-6;
+  let t0 = 0, t1 = 1;
+
+  if (Math.abs(d.z) < 1e-12) {
+    if (p.z < prism.min.z - eps || p.z > prism.max.z + eps) return null;
+  } else {
+    let ta = (prism.min.z - p.z) / d.z;
+    let tb = (prism.max.z - p.z) / d.z;
+    if (ta > tb) { const t = ta; ta = tb; tb = t; }
+    t0 = Math.max(t0, ta);
+    t1 = Math.min(t1, tb);
+    if (t0 >= t1) return null;
+  }
+
+  const n = prism.profile.length;
+  for (let i = 0; i < n; i++) {
+    const [ax, ay] = prism.profile[i];
+    const [bx, by] = prism.profile[(i + 1) % n];
+    const nx = -(by - ay);
+    const ny = bx - ax;
+    const da = nx * (p.x - ax) + ny * (p.y - ay);
+    const db = nx * (q.x - ax) + ny * (q.y - ay);
+    if (da < eps && db < eps) return null;
+    if (Math.abs(db - da) < 1e-12) continue;
+    const t = da / (da - db);
+    if (da < db) t0 = Math.max(t0, t); else t1 = Math.min(t1, t);
+    if (t0 >= t1) return null;
+  }
+  return [t0, t1];
 }
 
 /// The rim a shaped cut leaves where it enters and leaves the piece.

@@ -295,7 +295,15 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
     exactly the triangles Delete removes — so you see what will go before it goes. A welded
     piece has no triangles of its own, so they are recovered by centroid containment in its box
     and cached per piece, or a hover would redo the scan every frame.
-  - **A rim reads as one circle.** Two rims crossing on a face divide each other — four edges meet
+  - **Two cuts meeting each other** get their intersection curve. Two cylinders drilled through a
+  cube meet along a curve which is a crease of the result, belonging to neither cut's rim nor to
+  the piece — it belongs to the pair. Worth noting that the old mesh-crease reader found this one
+  for free, and taking edges from the CSG means it has to be reconstructed deliberately. It is
+  sampled rather than solved: each cut is a prism, so the rulings of one are clipped against the
+  other, and the ends of what survives lie on both surfaces at once. That works for any pair of
+  prisms, so two crossing grooves get their intersection as readily as two cylinders.
+  `Tests/cylinder.scad`: 396 outline segments became 580.
+- **A rim reads as one circle.** Two rims crossing on a face divide each other — four edges meet
   at the crossing, so chaining stops there, which is topologically right — but the halves are
   still one circle, and selecting the rim of a hole should give the rim. Arcs sharing a centre, a
   radius and a plane and meeting end to end are joined; the test is strict, so two distinct
