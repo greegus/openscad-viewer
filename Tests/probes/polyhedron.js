@@ -20,8 +20,10 @@ const measured = (() => {
     return document.getElementById('readout').innerText.replace(/\s+/g, ' ').trim();
   };
   const esc = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  // The board's top and the cube's top, 25 mm apart (the frustum's top is too small a target
+  // at this zoom: its rim lies within the edge snap of its centre).
   click([25, 310, 15]);
-  const faces = click([80, 200, 40]);
+  const faces = click([20, 20, 40]);
   esc();
   // Two corners: (40, 0, 40) of the cube and (100, 80, 20) of the second — √(60² + 80² + 20²).
   click([40, 0, 40]);
