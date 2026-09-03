@@ -161,8 +161,15 @@ the centroid, which on a curve is pulled inside and looks flatter than the facet
 
 The mesh is then asked only which triangles cover each face, matched by position and orientation
 **and bounded by the piece**: a shelf's end and the wall it stops against share a plane and a
-normal, and only the fact that the shelf's end lies within the shelf tells them apart. A triangle
-matching none is left out rather than guessed at.
+normal, and only the fact that the shelf's end lies within the shelf tells them apart. "Within"
+is measured as area, not by the centroid: the cabinet's side and the chest's below it are flush
+in one plane, the union welds them into one polygon, and a triangle of that polygon spans both
+boards — by centroid it belonged to one of them and the other showed a hole with a diagonal
+edge. By area it belongs to both, each drawing and measuring its own clipped part (the wall
+reads 1220 mm, not the welded 2020). The boundary is the box *minus the box cuts*: a drawer
+bottom's end showing through the wall's groove lies in the plane of the wall's end, inside the
+wall's box, and is the bottom's face, not the wall's. A triangle matching no face is left out
+rather than guessed at.
 
 Where a curve begins is decided the same way for faces and for edges, and the rule took three
 corrections to get right. A vertex turning under 1.5° is tessellation noise on a straight side;

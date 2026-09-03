@@ -145,7 +145,9 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
           if (already) already.triangles.push(...triangles);
           else state.faceTriangles.set(face, { mesh, triangles });
           const lookup = state.faceOf.get(mesh);
-          for (const t of triangles) if (!lookup.has(t)) lookup.set(t, face);
+          // A triangle can belong to two pieces' coplanar faces (one welded polygon spanning
+          // both); the hit point decides which at pick time.
+          for (const t of triangles) { const owners = lookup.get(t); if (owners) owners.push(face); else lookup.set(t, [face]); }
           const own = mine.get(mesh);
           if (own) own.push(...triangles); else mine.set(mesh, [...triangles]);
         }
@@ -155,6 +157,16 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
   }
 
   // --- picking ---
+
+  /// Whether a world point lies within a piece's box (a little slack for the surface itself).
+  function insidePiece(piece, point) {
+    if (!piece?.inverse || !piece.box) return false;
+    const p = point.clone().applyMatrix4(piece.inverse);
+    const s = 0.5;
+    return p.x >= piece.box.min.x - s && p.x <= piece.box.max.x + s
+        && p.y >= piece.box.min.y - s && p.y <= piece.box.max.y + s
+        && p.z >= piece.box.min.z - s && p.z <= piece.box.max.z + s;
+  }
 
   const raycaster = new THREE.Raycaster();
 
@@ -205,15 +217,21 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
   }
 
   /// Area, in-plane size and orientation of a planar face.
-  function faceInfo(mesh, triangles, normal) {
+  function faceInfo(mesh, triangles, normal, piece = null) {
     const pos = mesh.geometry.attributes.position;
     const verts = [];
     const v = new THREE.Vector3();
     let area = 0;
-    for (const t of triangles) {
+    // Measured on the part within the piece: a triangle of a face can span into the next
+    // piece's coplanar face (the cabinet's side above the chest's, welded into one polygon by
+    // the union), and unclipped it reported the height of both — 2020 mm for a 1220 mm wall.
+    const soup = piece ? clipToBox(mesh, triangles, piece.source ?? piece, 0.01) : null;   // a hair of slack: a face lies exactly on the box, and this is a measurement
+    const tris = soup ? soup.length / 9 : triangles.length;
+    for (let i = 0; i < tris; i++) {
       const tri = [];
       for (let k = 0; k < 3; k++) {
-        v.fromBufferAttribute(pos, t * 3 + k).applyMatrix4(mesh.matrixWorld);
+        if (soup) v.set(soup[i * 9 + k * 3], soup[i * 9 + k * 3 + 1], soup[i * 9 + k * 3 + 2]);
+        else v.fromBufferAttribute(pos, triangles[i] * 3 + k).applyMatrix4(mesh.matrixWorld);
         tri.push(v.clone());
         verts.push(v.clone());
       }
@@ -233,11 +251,9 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
       const d = axis.clone().addScaledVector(normal, -axis.dot(normal));
       if (d.lengthSq() > 1e-6) candidates.push(d.normalize());
     }
-    for (const t of triangles.slice(0, 64)) {
+    for (let i = 0; i < Math.min(verts.length, 192); i += 3) {
       for (let k = 0; k < 3; k++) {
-        const p = new THREE.Vector3().fromBufferAttribute(pos, t * 3 + k).applyMatrix4(mesh.matrixWorld);
-        const q = new THREE.Vector3().fromBufferAttribute(pos, t * 3 + (k + 1) % 3).applyMatrix4(mesh.matrixWorld);
-        const d = q.sub(p).addScaledVector(normal, 0);
+        const d = verts[i + (k + 1) % 3].clone().sub(verts[i + k]);
         if (d.lengthSq() > 1e-6) candidates.push(d.normalize());
       }
     }
@@ -367,7 +383,8 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     const triangles = info.groups.get(info.find(h.faceIndex)) ?? [h.faceIndex];
     // The CSG face this triangle belongs to, when there is one. It carries its own identity, so
     // a curved wall arrives whole and a plane stops where the piece stops.
-    const face = state.faceOf.get(h.object)?.get(h.faceIndex);
+    const owners = state.faceOf.get(h.object)?.get(h.faceIndex);
+    const face = owners && (owners.length === 1 ? owners[0] : owners.find((f) => insidePiece(f.piece, h.point)) ?? owners[0]);
     if (face) {
       const group = state.faceTriangles.get(face);
       return { type: 'face', face, mesh: group.mesh, triangles: group.triangles,
@@ -463,7 +480,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
         ['Triangles', String(target.triangles.length)],
       ];
     }
-    const f = faceInfo(target.mesh, target.triangles, target.normal);
+    const f = faceInfo(target.mesh, target.triangles, target.normal, target.type === 'face' ? target.piece : null);
     const axis = axisName(target.normal);
     return [
       ['Size', `${mm(f.width)} × ${mm(f.height)} mm`],
@@ -488,7 +505,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
       const b = bodyBox(target.mesh, target.triangles);
       return `${mm(b.x)} × ${mm(b.y)} × ${mm(b.z)} mm`;
     }
-    const f = faceInfo(target.mesh, target.triangles, target.normal);
+    const f = faceInfo(target.mesh, target.triangles, target.normal, target.type === 'face' ? target.piece : null);
     return `${mm(f.width)} × ${mm(f.height)} mm`;
   }
 

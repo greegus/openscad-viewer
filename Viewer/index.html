@@ -1080,6 +1080,14 @@ window.debug = {
     return out;
   },
   pieceCoverage: () => inspect?.pieceCoverage() ?? null,
+  cutsOf: (id) => {
+    const piece = pieceModel.find((p) => p.id === id);
+    if (!piece) return null;
+    pieceFaces(piece);
+    return (piece.cuts ?? []).map((c) => ({ min: c.box.min.toArray(), max: c.box.max.toArray(),
+      // Where the wall's end corner lands in cut space, as a sanity check of the transform.
+      cornerInCut: new THREE.Vector3(piece.box.max.x, piece.box.min.y, piece.box.min.z).applyMatrix4(piece.world).applyMatrix4(c.worldToCut).toArray().map((v) => +v.toFixed(2)) }));
+  },
   /// A sphere's silhouette as currently drawn: segment count and the radius of the ring.
   silhouette: (id) => {
     const piece = pieceModel.find((p) => p.id === id);
@@ -1096,7 +1104,7 @@ window.debug = {
     if (!face) return null;
     const out = [];
     for (const part of parts) {
-      const tris = assignTriangles(part.mesh, faces, trianglesInBox(part.mesh, piece.source ?? piece)).get(face) ?? [];
+      const tris = assignTriangles(part.mesh, faces, trianglesTouchingBox(part.mesh, piece.source ?? piece)).get(face) ?? [];
       const pos = part.mesh.geometry.attributes.position;
       const v = new THREE.Vector3();
       for (const t of tris) out.push([0, 1, 2].map((k) => { v.fromBufferAttribute(pos, t * 3 + k).applyMatrix4(part.mesh.matrixWorld); return [v.x, v.y, v.z].map((q) => +q.toFixed(2)); }));

@@ -23,6 +23,15 @@ expect "names in order"  "$(echo "$out" | field "['names']")" '["Cube", "Wedge",
 expect "wedge"           "$(echo "$out" | field "['wedge']")" '{"claimed": "8/8", "edges": 9, "faces": 5}'
 expect "ball"            "$(echo "$out" | field "['ball']")" '{"claimed": "2300/2300", "faces": ["sphere:2300/r20"], "silhouetteRadius": 20, "silhouetteSegments": 96, "staticEdges": 0}'
 
+echo "Tests/flush.scad"
+out=$(Tests/probe.sh Tests/flush.scad Tests/probes/flush.js) || { echo "  probe failed: $out"; exit 1; }
+expect "names in order"         "$(echo "$out" | field "['names']")"           '["Lower board", "Upper board", "Wall", "Panel"]'
+expect "welded side claimed by both" "$(echo "$out" | field "['sideClaims']")" '[true, true]'
+expect "upper board front reads its own size" "$(echo "$out" | field "['upperFrontSize']")" "100 × 500 mm"
+expect "every piece fully covered" "$(echo "$out" | field "['coverage']")"     '["#1 full", "#2 full", "#3 full", "#4 full"]'
+expect "wall ends without the panel" "$(echo "$out" | field "['wallEndTriangles']")" "[6, 6]"
+expect "pieces in several meshes" "$(echo "$out" | field "['inSeveralMeshes']")" "0"
+
 if [ $# -ge 1 ]; then
   echo "$1"
   cat > build/design-probe.js <<'JS'

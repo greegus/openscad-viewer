@@ -233,8 +233,15 @@ export function pieceFaces(piece) {
   }
 
   // Every cut adds the surface it leaves behind, in the piece's coordinates.
+  // The box cuts are also remembered on the piece: a face's boundary is the piece's box *minus*
+  // its cuts, and triangle assignment needs that — see `assignTriangles`.
+  piece.cuts = [];
   for (const cut of source.cutters ?? []) {
     const box = prepareBox(cut);
+    if (!cut.profile) {
+      const cutToPiece = new THREE.Matrix4().multiplyMatrices(piece.inverse, MODEL_TO_WORLD).multiply(box.matrix);
+      piece.cuts.push({ box, worldToCut: cutToPiece.clone().invert().multiply(piece.inverse) });
+    }
     // Cut space into the piece's own space. The cutter's matrix reaches model space, and
     // `piece.inverse` reaches back from the world, so MODEL_TO_WORLD sits between them —
     // leaving it out applies the piece's own transform twice.
@@ -503,11 +510,33 @@ export function assignTriangles(mesh, faces, candidates = null) {
       // thing a neighbour's triangle on the same plane cannot manage.
       const piece = face.piece;
       if (piece?.inverse && piece.box) {
-        local.copy(centroid).applyMatrix4(piece.inverse);
-        const bx = piece.box;
-        if (local.x < bx.min.x - slack || local.x > bx.max.x + slack
-         || local.y < bx.min.y - slack || local.y > bx.max.y + slack
-         || local.z < bx.min.z - slack || local.z > bx.max.z + slack) continue;
+        if (face.kind === 'plane') {
+          // "Within the piece" means the triangle has area inside the piece's box, not that its
+          // centroid does. Two boards flush in one plane — the cabinet's side above the chest's
+          // — are welded into one polygon by the union, and a triangle of that polygon can span
+          // both; by centroid it belonged to one of them, or to the gap between, and the other
+          // showed a hole with a diagonal edge. By area it belongs to both, each drawing its own
+          // clipped part. A neighbour's triangle merely touching the box along an edge — the
+          // wall around a shelf's end — has no area inside and is still refused.
+          // Nudged a quarter millimetre into the material first: the triangle lies exactly on
+          // the box's boundary plane, and arithmetic noise there would clip all of it away.
+          // Along the plane the clipping stays exact, which is what keeps the touching wall out.
+          const into = face.normal.clone().multiplyScalar(face.inward ? 0.25 : -0.25);
+          let area = clippedArea(a, b, c, piece.box, piece.inverse, into);
+          // Minus what lies inside a cut: a groove is not the piece's material, and the end of
+          // the drawer bottom showing through the wall's groove is the bottom's face, not the
+          // wall's. Only box cuts — a round hole's box would take the whole top of a drilled cube.
+          if (!face.inward && area >= 0.01) {
+            for (const cut of piece.cuts ?? []) area -= clippedArea(a, b, c, cut.box, cut.worldToCut, into);
+          }
+          if (area < 0.01) continue;
+        } else {
+          local.copy(centroid).applyMatrix4(piece.inverse);
+          const bx = piece.box;
+          if (local.x < bx.min.x - slack || local.x > bx.max.x + slack
+           || local.y < bx.min.y - slack || local.y > bx.max.y + slack
+           || local.z < bx.min.z - slack || local.z > bx.max.z + slack) continue;
+        }
       }
 
       // Every vertex, not the centroid: a facet lying across a curve has its centroid pulled
@@ -542,10 +571,41 @@ export function assignTriangles(mesh, faces, candidates = null) {
       } else {
         groups.get(face).push(t);
       }
-      break;
+      // A curved face owns its triangle outright; a plane's triangle may span into the next
+      // piece's coplanar face as well, so the search goes on.
+      if (face.kind !== 'plane') break;
     }
   }
   return groups;
+}
+
+/// Area of the part of triangle abc (world) that lies inside `box` (in the space `inverse` maps
+/// into) — the triangle clipped to the box's six half-spaces, then measured.
+function clippedArea(a, b, c, box, inverse, shift = null) {
+  let poly = [a, b, c].map((p) => (shift ? p.clone().add(shift) : p.clone()).applyMatrix4(inverse));
+  for (const axis of ['x', 'y', 'z']) {
+    for (const side of [-1, 1]) {
+      const limit = side < 0 ? box.min[axis] : box.max[axis];
+      const inside = (p) => (side < 0 ? p[axis] >= limit : p[axis] <= limit);
+      const next = [];
+      for (let i = 0; i < poly.length; i++) {
+        const p = poly[i], q = poly[(i + 1) % poly.length];
+        const pin = inside(p), qin = inside(q);
+        if (pin) next.push(p);
+        if (pin !== qin) {
+          const t = (limit - p[axis]) / (q[axis] - p[axis]);
+          next.push(p.clone().lerp(q, t));
+        }
+      }
+      poly = next;
+      if (poly.length < 3) return 0;
+    }
+  }
+  const sum = new THREE.Vector3();
+  for (let i = 1; i + 1 < poly.length; i++) {
+    sum.add(poly[i].clone().sub(poly[0]).cross(poly[i + 1].clone().sub(poly[0])));
+  }
+  return sum.length() / 2;
 }
 
 /// Pickable features, grouped per piece.
@@ -710,12 +770,11 @@ function meshToPiece(mesh, box) {
 /// not to the question being asked, which is about the piece under the cursor.
 ///
 /// Sutherland–Hodgman against the box's six planes, in the piece's own coordinates.
-export function clipToBox(mesh, triangles, component) {
+export function clipToBox(mesh, triangles, component, slack = 0.5) {
   const box = prepareBox(component);
   const toPiece = meshToPiece(mesh, box);
   const toWorld = new THREE.Matrix4().multiplyMatrices(MODEL_TO_WORLD, box.matrix);
   const position = mesh.geometry.attributes.position;
-  const slack = 0.5;
   const out = [];
 
   const planes = [

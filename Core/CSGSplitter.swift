@@ -80,13 +80,19 @@ enum CSGSplitter {
     /// The one subtlety: in a *subtrahend* position (operands 2..n of a difference, and all
     /// operands of an intersection) nothing may be pruned. Those shapes cut or constrain the
     /// result, so dropping them would leave holes filled in and produce wrong geometry.
-    static func emit(_ node: Node, target: [Double]?, subtrahend: Bool = false, depth: Int = 0) -> String {
+    static func emit(_ node: Node, target: [Double]?, subtrahend: Bool = false, depth: Int = 0,
+                     coloured: Bool = false) -> String {
         let pad = String(repeating: "\t", count: depth)
 
-        if let c = colour(of: node), !subtrahend, c != target {
+        let own = colour(of: node)
+        if let c = own, !subtrahend, c != target {
             return "\(pad)group();\n"       // different material → contribute nothing
         }
         if node.children.isEmpty {
+            // A solid with no colour anywhere above it belongs to the default pass alone. It used
+            // to survive into every coloured pass as well, so a design with one coloured piece
+            // among plain ones had the plain ones twice — in two meshes, the same triangles.
+            if target != nil, !coloured, !subtrahend { return "\(pad)group();\n" }
             return "\(pad)\(node.name)(\(node.args));\n"
         }
 
@@ -95,7 +101,8 @@ enum CSGSplitter {
             let sub = subtrahend
                 || (node.name == "difference" && index > 0)
                 || node.name == "intersection"
-            body += emit(child, target: target, subtrahend: sub, depth: depth + 1)
+            body += emit(child, target: target, subtrahend: sub, depth: depth + 1,
+                         coloured: coloured || own != nil)
         }
         return "\(pad)\(node.name)(\(node.args)) {\n\(body)\(pad)}\n"
     }
