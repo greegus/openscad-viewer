@@ -320,7 +320,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     }
     return points;
   }
-  const followsCamera = (piece) => piece.sphere || piece.revolve;
+  const followsCamera = () => true;      // any piece may have a cylindrical face, whose grazing lines move
 
   function show(target, lines, face) {
     lines.visible = false;

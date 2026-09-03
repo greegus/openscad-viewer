@@ -16,6 +16,7 @@ expect "triangles claimed by faces" "$(echo "$out" | field "['trianglesClaimed']
 expect "full circles r=50"          "$(echo "$out" | field "['circles']")"          "4"
 expect "ellipses"                   "$(echo "$out" | field "['ellipses']")"         '["70.7x50/96", "70.7x50/96"]'
 expect "hover/select overlap"       "$(echo "$out" | field "['highlightOverlap']")" "1"
+expect "grazing lines in the two holes" "$(echo "$out" | field "['silhouetteLines']")" "4"
 
 echo "Tests/polyhedron.scad"
 out=$(Tests/probe.sh Tests/polyhedron.scad Tests/probes/polyhedron.js) || { echo "  probe failed: $out"; exit 1; }
@@ -39,7 +40,7 @@ expect "names in order"  "$(echo "$out" | field "['names']")"    '["Cone", "Frus
 expect "every triangle claimed" "$(echo "$out" | field "['coverage']")" '["94/94", "188/188", "384/384", "300/300"]'
 expect "cone"    "$(echo "$out" | field "['cone']")"    '{"faces": ["plane:bottom", "cone:cone"], "rimSegments": 48, "silhouetteLines": 2}'
 expect "frustum" "$(echo "$out" | field "['frustum']")" '{"faces": ["plane:bottom", "cone:cone", "plane:top"], "rimSegments": 96, "silhouetteLines": 2}'
-expect "tube"    "$(echo "$out" | field "['tube']")"    '{"faces": ["plane:bottom", "cylinder:side", "plane:top", "cylinder:bore"], "rimSegments": 192, "silhouetteLines": 0}'
+expect "tube"    "$(echo "$out" | field "['tube']")"    '{"faces": ["plane:bottom", "cylinder:side", "plane:top", "cylinder:bore"], "rimSegments": 192, "silhouetteLines": 4}'
 expect "countersunk board" "$(echo "$out" | field "['board']['rimSegments']")" "108"
 expect "measure board top to frustum top" "$(echo "$out" | field "['measured']")" "Parallel faces · distance 25.0 mm"
 

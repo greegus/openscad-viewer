@@ -222,8 +222,8 @@ them differently:
 | box edge | a 90° crease | yes |
 | CSG edge | the perimeter of a groove or pocket | yes |
 | arc rim | where a rounded side meets a flat face | yes |
-| the rounded surface itself | facets 3.75° apart at `$fn = 96` | **no** — under the 20° threshold |
-| silhouette | the outline you *see* | **no** — it depends on the camera |
+| the rounded surface itself | facets 3.75° apart at `$fn = 96` | **no** — one smooth face |
+| silhouette | where the view grazes a curved face | not an edge of the solid, but **drawn**, following the camera — as Fusion does |
 | tangent transition | flat meeting round | yes: a boundary between two faces, drawn as Fusion draws it |
 | weld seam | where `union` joined two panels | sometimes absent, sometimes spurious |
 | inner loop | the boundary of a hole, e.g. a handle recess | yes |
@@ -689,7 +689,9 @@ OpenSCAD is looked up in this order: `OPENSCAD_PATH` → setting →
   same way an extrusion's outline is, and each straight run is one face — a vertical run a
   cylinder, a horizontal one an annulus, a slanted one a cone (with an inner wall, a bore, marked
   inward like a cut's face). The rims between runs are the edges, and a cone's two grazing lines
-  follow the camera exactly, since a cone's normal is constant along a generatrix. A curved run
+  follow the camera exactly, since a cone's normal is constant along a generatrix — and so do a
+  cylinder's, on a boss, on the wall of a hole, and on a rounded corner (there only while the
+  grazing direction falls within the arc the corner covers). A curved run
   would be a torus and has no face yet; a partial `rotate_extrude(angle)` falls back to the box
   and is marked *bounds only*. `Tests/cone.scad`: cone, frustum, tube and a countersunk board,
   every triangle claimed, 48 rim segments per circle.

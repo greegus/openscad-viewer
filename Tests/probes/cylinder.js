@@ -13,4 +13,6 @@ return {
   // Hover and selection of the whole piece paint the same strokes, pixel for pixel — after
   // the hover stroke has already been used on an edge, as in real use.
   highlightOverlap: parity.overlap,
+  // Each hole's wall shows its two grazing lines, clipped to the cube.
+  silhouetteLines: window.debug.silhouette(1)?.segments ?? 0,
 };

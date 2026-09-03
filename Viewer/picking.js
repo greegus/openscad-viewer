@@ -193,10 +193,15 @@ export function pieceFaces(piece) {
     piece,
     dividers: [],       // tangent lines lying in this face, which split it — see below
   });
-  const cylinder = (p0, axis, radius, label, inward = false) => faces.push({
+  /// `extent` is the axial length from `p0`; `arc`, for a rounded corner, three points along the
+  /// arc (start, middle, end) at p0's height, so a grazing line is drawn only where the surface
+  /// actually is.
+  const cylinder = (p0, axis, radius, label, inward = false, extent = null, arc = null) => faces.push({
     kind: 'cylinder', label, radius, inward,
     point: p0.clone().applyMatrix4(toWorld),
     axis: axis.clone().transformDirection(toWorld).normalize(),
+    extent,
+    arc: arc ? arc.map((q) => q.clone().applyMatrix4(toWorld)) : null,
     piece,
   });
   const sphere = (centre, radius, label) => faces.push({
@@ -262,7 +267,7 @@ export function pieceFaces(piece) {
     // A cut's faces look into the hole: the cutter's outer wall is an inward face of the piece,
     // and a bore through the cutter (material left standing inside) would be an outward one.
     addSurfaces(cut, box, (p0, n, label) => plane(place(p0), dir(n), label, null, true),
-                (p0, axis, radius, label, inwardOfCutter = false) => cylinder(place(p0), dir(axis), radius, label, !inwardOfCutter),
+                (p0, axis, radius, label, inwardOfCutter = false, extent = null, arc = null) => cylinder(place(p0), dir(axis), radius, label, !inwardOfCutter, extent, arc ? arc.map(place) : null),
                 'cut ', null,
                 (apex, axis, tan, from, to, label, inwardOfCutter = false) => cone(place(apex), dir(axis), tan, from, to, label, !inwardOfCutter));
   }
@@ -298,7 +303,7 @@ function revolveSurfaces(source, box, plane, cylinder, cone, prefix) {
       // Annulus at height z.
       plane(new THREE.Vector3(centre.x, centre.y, min.z + a.y), new THREE.Vector3(0, 0, Math.sign(outwardZ)), prefix + (outwardZ > 0 ? 'top' : 'bottom'));
     } else if (Math.abs(dr) < 1e-6) {
-      cylinder(new THREE.Vector3(centre.x, centre.y, min.z), up, a.x, prefix + (outwardR > 0 ? 'side' : 'bore'), outwardR < 0);
+      cylinder(new THREE.Vector3(centre.x, centre.y, min.z + Math.min(a.y, b.y)), up, a.x, prefix + (outwardR > 0 ? 'side' : 'bore'), outwardR < 0, Math.abs(dz));
     } else if (cone) {
       // The apex is where the radius would reach zero; the axis is taken from the apex toward
       // the wider end, so the radius grows along it.
@@ -476,6 +481,7 @@ function addSurfaces(source, box, plane, cylinder, prefix, sphere = null, cone =
   // cylinder. The runs come from `profileRuns`, the same division the edge overlay draws its
   // verticals at, so a face and the edge bounding it agree by construction.
   const { runs, at, fitOf } = profileRuns(source.profile);
+  const n = source.profile.length;
 
   for (const run of runs) {
     const a = at(run.start);
@@ -483,8 +489,11 @@ function addSurfaces(source, box, plane, cylinder, prefix, sphere = null, cone =
     if (run.curved) {
       const fit = fitOf(run);
       if (fit) {
+        const whole = run.end - run.start >= n;
+        const m = at(Math.floor((run.start + run.end) / 2));
         cylinder(new THREE.Vector3(fit.centre.x, fit.centre.y, min.z),
-                 new THREE.Vector3(0, 0, 1), fit.radius, prefix + 'round side');
+                 new THREE.Vector3(0, 0, 1), fit.radius, prefix + 'round side', false, max.z - min.z,
+                 whole ? null : [a, m, b].map((q) => new THREE.Vector3(q.x, q.y, min.z)));
       }
     } else {
       const edge = b.clone().sub(a);
@@ -507,9 +516,71 @@ function addSurfaces(source, box, plane, cylinder, prefix, sphere = null, cone =
 /// What is drawn of a piece that depends on the camera: a sphere's silhouette, a cone's two
 /// grazing lines. Empty for anything else.
 export function pieceSilhouette(piece, camera) {
-  if (piece.sphere) return sphereSilhouette(piece, camera);
-  if (piece.revolve) return revolveSilhouette(piece, camera);
-  return [];
+  const out = piece.sphere ? sphereSilhouette(piece, camera)
+            : piece.revolve ? revolveSilhouette(piece, camera) : [];
+  for (const face of facesOf(piece)) {
+    if (face.kind === 'cylinder' && face.extent) out.push(...cylinderSilhouette(face, piece, camera));
+  }
+  return out;
+}
+
+/// A piece's faces, built once per piece object; the model is rebuilt on any change, so the
+/// cache empties itself.
+const faceCache = new WeakMap();
+export function facesOf(piece) {
+  let faces = faceCache.get(piece);
+  if (!faces) { faces = pieceFaces(piece); faceCache.set(piece, faces); }
+  return faces;
+}
+
+/// The two grazing lines of a cylindrical face — a boss, the wall of a hole, a rounded corner —
+/// as Fusion draws them. A cylinder's normal is constant along a generatrix, so the generatrix
+/// is on the silhouette when n·(P − E) = 0 for the eye E; with P on the surface that is
+/// n·(A − E) + r = 0 for any point A of the axis, exact under perspective. Only within the
+/// arc the face actually covers, and clipped to the piece.
+function cylinderSilhouette(face, piece, camera) {
+  const axis = face.axis;
+  const u = new THREE.Vector3(1, 0, 0);
+  if (Math.abs(u.dot(axis)) > 0.9) u.set(0, 1, 0);
+  u.cross(axis).normalize();
+  const v = new THREE.Vector3().crossVectors(axis, u).normalize();
+  let A, B, C;
+  if (camera.isPerspectiveCamera) {
+    const d = face.point.clone().sub(camera.position);
+    A = u.dot(d); B = v.dot(d); C = -face.radius;
+  } else {
+    const d = camera.getWorldDirection(new THREE.Vector3());
+    A = u.dot(d); B = v.dot(d); C = 0;
+  }
+  const m = Math.hypot(A, B);
+  if (m < 1e-9 || Math.abs(C) > m) return [];
+  const base = Math.atan2(B, A), spread = Math.acos(C / m);
+  const out = [];
+  for (const theta of [base + spread, base - spread]) {
+    const radial = u.clone().multiplyScalar(Math.cos(theta)).addScaledVector(v, Math.sin(theta));
+    if (face.arc && !withinArc(face, radial)) continue;
+    const a = face.point.clone().addScaledVector(radial, face.radius);
+    const b = a.clone().addScaledVector(axis, face.extent);
+    // Kept to the piece: a cut's wall reaches past the surface by its overshoot.
+    const la = a.clone().applyMatrix4(piece.inverse), lb = b.clone().applyMatrix4(piece.inverse);
+    const span = clipToBoxSpan(la, lb, piece.box, 0.05);
+    if (!span) continue;
+    out.push(a.clone().lerp(b, span[0]), a.clone().lerp(b, span[1]));
+  }
+  return out;
+}
+
+/// Whether a radial direction falls within the arc a partial cylinder face covers: between its
+/// start and end, on the side its middle point is.
+function withinArc(face, radial) {
+  const [a, m, b] = face.arc;
+  const dir = (q) => q.clone().sub(face.point).addScaledVector(face.axis, -q.clone().sub(face.point).dot(face.axis)).normalize();
+  const da = dir(a), dm = dir(m), db = dir(b);
+  const angle = (x, y) => Math.atan2(new THREE.Vector3().crossVectors(x, y).dot(face.axis), x.dot(y));
+  // Measured from the start in the direction the middle lies: the arc covers [0, total].
+  const forward = angle(da, dm) >= 0 ? 1 : -1;
+  const wrap = (t) => ((forward * t) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+  return wrap(angle(da, radial)) <= wrap(angle(da, db)) + 1e-6;
 }
 
 /// The grazing lines of the conical parts of a solid of revolution. A cone's surface normal is

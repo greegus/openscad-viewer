@@ -687,7 +687,7 @@ function buildEdgeOverlay(pieces) {
 let silhouetteLines = null;
 let silhouetteCameraKey = '';
 function updateSilhouettes() {
-  const spheres = pieceModel.filter((p) => p.sphere || p.revolve);
+  const spheres = pieceModel;      // any piece may have a cylindrical face
   if (!spheres.length) {
     if (silhouetteLines) { scene.remove(silhouetteLines); silhouetteLines.geometry.dispose(); silhouetteLines = null; }
     return;
@@ -1093,7 +1093,7 @@ window.debug = {
   /// A sphere's silhouette as currently drawn: segment count and the radius of the ring.
   silhouette: (id) => {
     const piece = pieceModel.find((p) => p.id === id);
-    if (!piece || !(piece.sphere || piece.revolve)) return null;
+    if (!piece) return null;
     const pts = pieceSilhouette(piece, view.camera);
     const c = pts.reduce((acc, p) => acc.add(p), new THREE.Vector3()).divideScalar(pts.length || 1);
     return { segments: pts.length / 2, radius: pts.length ? +pts[0].distanceTo(c).toFixed(2) : 0 };
