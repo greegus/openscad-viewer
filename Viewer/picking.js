@@ -209,6 +209,15 @@ export function pieceFaces(piece) {
     point: centre.clone().applyMatrix4(toWorld),
     piece,
   });
+  /// A torus about `axis` through `centre`: a tube of radius `rho` around a circle of radius
+  /// `major`. `phi` is the part of the tube's profile the face covers, as angles in the
+  /// (radial, axial) half-plane — start, middle, end — since a rounded edge is a quarter of it.
+  const torus = (centre, axis, major, rho, phi, label, inward = false) => faces.push({
+    kind: 'torus', label, major, rho, phi, inward,
+    point: centre.clone().applyMatrix4(toWorld),
+    axis: axis.clone().transformDirection(toWorld).normalize(),
+    piece,
+  });
   /// A cone about `axis` from `apex`, widening at `tan` per unit along it, over the axial range
   /// [from, to] from the apex.
   const cone = (apex, axis, tan, from, to, label, inward = false) => faces.push({
@@ -218,7 +227,7 @@ export function pieceFaces(piece) {
     piece,
   });
 
-  addSurfaces(source, piece.box, plane, cylinder, '', sphere, cone);
+  addSurfaces(source, piece.box, plane, cylinder, '', sphere, cone, torus);
 
   // A cut that only touches a face splits it. Where two cylinders each graze the same wall the
   // wall has zero thickness at their crossing, and a B-rep kernel reports that by dividing the
@@ -269,7 +278,8 @@ export function pieceFaces(piece) {
     addSurfaces(cut, box, (p0, n, label) => plane(place(p0), dir(n), label, null, true),
                 (p0, axis, radius, label, inwardOfCutter = false, extent = null, arc = null) => cylinder(place(p0), dir(axis), radius, label, !inwardOfCutter, extent, arc ? arc.map(place) : null),
                 'cut ', null,
-                (apex, axis, tan, from, to, label, inwardOfCutter = false) => cone(place(apex), dir(axis), tan, from, to, label, !inwardOfCutter));
+                (apex, axis, tan, from, to, label, inwardOfCutter = false) => cone(place(apex), dir(axis), tan, from, to, label, !inwardOfCutter),
+                (centre, axis, major, rho, phi, label, inwardOfCutter = false) => torus(place(centre), dir(axis), major, rho, phi, label, !inwardOfCutter));
   }
   return faces;
 }
@@ -287,14 +297,32 @@ function revolveProfile(source) {
 /// a cylinder, a horizontal one a plane (an annulus), a slanted one a cone. A run whose normal
 /// points at the axis is an inner wall — a tube's bore — and is marked inward like a cut's face.
 /// A curved run would be a torus, which has no face here yet.
-function revolveSurfaces(source, box, plane, cylinder, cone, prefix) {
+function revolveSurfaces(source, box, plane, cylinder, cone, torus, prefix) {
   const { min, max } = box;
   const centre = new THREE.Vector2((min.x + max.x) / 2, (min.y + max.y) / 2);
   const profile = revolveProfile(source);
-  const { runs, at } = profileRuns(profile.map((p) => [p.x, p.y]));
+  const { runs, at, fitOf } = profileRuns(profile.map((p) => [p.x, p.y]));
   const up = new THREE.Vector3(0, 0, 1);
+  const n = profile.length;
   for (const run of runs) {
-    if (run.curved) continue;
+    if (run.curved) {
+      // A curved run is a torus: the arc's circle swept round the axis. Which part of the tube,
+      // as angles about the arc's centre in the (r, z) half-plane; and whether the material is
+      // inside the tube (a rounded edge, a bead) or outside it (a groove, a fillet in a corner) —
+      // told by which side of the arc its outward normal falls.
+      const fit = fitOf(run);
+      if (!fit || !torus) continue;
+      const whole = run.end - run.start >= n;
+      const a = at(run.start), m = at(Math.floor((run.start + run.end) / 2)), b = at(run.end);
+      const ang = (q) => Math.atan2(q.y - fit.centre.y, q.x - fit.centre.x);
+      const edge = b.clone().sub(a);
+      const outward = new THREE.Vector2(edge.y, -edge.x);           // (dz, −dr) of the chord
+      const bulges = whole || outward.dot(m.clone().sub(fit.centre)) > 0;   // normal away from the arc's centre; a full tube always bulges
+      torus(new THREE.Vector3(centre.x, centre.y, min.z + fit.centre.y), up, fit.centre.x, fit.radius,
+            whole ? null : { start: ang(a), mid: ang(m), end: ang(b) },
+            prefix + (bulges ? 'round' : 'fillet'), !bulges);
+      continue;
+    }
     const a = at(run.start), b = at(run.end);
     if (a.x < 1e-6 && b.x < 1e-6) continue;                       // the axis itself
     const dr = b.x - a.x, dz = b.y - a.y;
@@ -312,7 +340,7 @@ function revolveSurfaces(source, box, plane, cylinder, cone, prefix) {
       const axis = new THREE.Vector3(0, 0, widening ? 1 : -1);
       const s1 = Math.abs(a.y - zApex), s2 = Math.abs(b.y - zApex);
       cone(new THREE.Vector3(centre.x, centre.y, min.z + zApex), axis, Math.abs(dr / dz),
-           Math.min(s1, s2), Math.max(s1, s2), prefix + (outwardR > 0 ? 'cone' : 'bore'), outwardR < 0);
+           Math.min(s1, s2), Math.max(s1, s2), prefix + 'cone', outwardR < 0);
     }
   }
 }
@@ -334,7 +362,8 @@ function revolveRims(source, box, fragments, zLow = -Infinity, zHigh = Infinity)
     seen.add(key);
     rims.push({ r, z });
   };
-  for (const run of runs) { const v = at(run.start); add(v.x, v.y); }
+  const whole = runs.length === 1 && runs[0].curved;              // a circle revolved: a plain torus, no rim
+  if (!whole) for (const run of runs) { const v = at(run.start); add(v.x, v.y); }
   // Where the depth range cuts a slanted or vertical run, the rim is the circle at that depth.
   for (const run of runs) {
     if (run.curved) continue;
@@ -439,11 +468,11 @@ function profileRuns(points) {
 }
 
 /// The surfaces of one primitive — a box, or a profile extruded along z.
-function addSurfaces(source, box, plane, cylinder, prefix, sphere = null, cone = null) {
+function addSurfaces(source, box, plane, cylinder, prefix, sphere = null, cone = null, torus = null) {
   const { min, max } = box;
 
   if (source.revolve) {
-    revolveSurfaces(source, box, plane, cylinder, cone, prefix);
+    revolveSurfaces(source, box, plane, cylinder, cone, torus, prefix);
     return;
   }
 
@@ -520,6 +549,7 @@ export function pieceSilhouette(piece, camera) {
             : piece.revolve ? revolveSilhouette(piece, camera) : [];
   for (const face of facesOf(piece)) {
     if (face.kind === 'cylinder' && face.extent) out.push(...cylinderSilhouette(face, piece, camera));
+    if (face.kind === 'torus') out.push(...torusSilhouette(face, piece, camera));
   }
   return out;
 }
@@ -570,6 +600,48 @@ function cylinderSilhouette(face, piece, camera) {
   return out;
 }
 
+/// Whether an angle round the tube falls within the part of the profile a torus face covers:
+/// between start and end, on the side the middle is.
+function withinPhi(phi, angle) {
+  const forward = ((phi.mid - phi.start + 3 * Math.PI) % (2 * Math.PI)) - Math.PI >= 0 ? 1 : -1;
+  const wrap = (t) => ((forward * t) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+  return wrap(angle - phi.start) <= wrap(phi.end - phi.start) + 1e-3;   // a vertex sits exactly on the end; mesh noise is above 1e-6
+}
+
+/// The silhouette of a torus face, sampled round the axis. At each θ the normal round the tube
+/// is n = cosφ·radial + sinφ·axis, and n·(P − E) = 0 comes to (a + R)cosφ + b·sinφ = −ρ with
+/// a = radial·(c − E), b = axis·(c − E) — two solutions in φ, so two curves, each kept to the
+/// part of the tube the face covers. Orthographic: a = radial·d, b = axis·d, and 0 in place of ρ.
+function torusSilhouette(face, piece, camera) {
+  const axis = face.axis;
+  const u = new THREE.Vector3(1, 0, 0);
+  if (Math.abs(u.dot(axis)) > 0.9) u.set(0, 1, 0);
+  u.cross(axis).normalize();
+  const v = new THREE.Vector3().crossVectors(axis, u).normalize();
+  const eye = camera.isPerspectiveCamera ? camera.position : null;
+  const d = eye ? face.point.clone().sub(eye) : camera.getWorldDirection(new THREE.Vector3());
+  const steps = Math.max(48, piece.fragments ?? 48);
+  const out = [];
+  const branches = [[], []];
+  for (let i = 0; i <= steps; i++) {
+    const theta = 2 * Math.PI * i / steps;
+    const radial = u.clone().multiplyScalar(Math.cos(theta)).addScaledVector(v, Math.sin(theta));
+    const A = radial.dot(d) + (eye ? face.major : 0), B = axis.dot(d), C = eye ? -face.rho : 0;
+    const m = Math.hypot(A, B);
+    if (m < 1e-9 || Math.abs(C) > m) { branches[0].push(null); branches[1].push(null); continue; }
+    const base = Math.atan2(B, A), spread = Math.acos(C / m);
+    [base + spread, base - spread].forEach((phi, k) => {
+      if (face.phi && !withinPhi(face.phi, phi)) { branches[k].push(null); return; }
+      branches[k].push(face.point.clone().addScaledVector(radial, face.major + face.rho * Math.cos(phi))
+                                          .addScaledVector(axis, face.rho * Math.sin(phi)));
+    });
+  }
+  for (const pts of branches) {
+    for (let i = 0; i + 1 < pts.length; i++) if (pts[i] && pts[i + 1]) out.push(pts[i], pts[i + 1]);
+  }
+  return out;
+}
+
 /// Whether a radial direction falls within the arc a partial cylinder face covers: between its
 /// start and end, on the side its middle point is.
 function withinArc(face, radial) {
@@ -580,7 +652,7 @@ function withinArc(face, radial) {
   // Measured from the start in the direction the middle lies: the arc covers [0, total].
   const forward = angle(da, dm) >= 0 ? 1 : -1;
   const wrap = (t) => ((forward * t) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
-  return wrap(angle(da, radial)) <= wrap(angle(da, db)) + 1e-6;
+  return wrap(angle(da, radial)) <= wrap(angle(da, db)) + 1e-3;
 }
 
 /// The grazing lines of the conical parts of a solid of revolution. A cone's surface normal is
@@ -831,6 +903,18 @@ export function assignTriangles(mesh, faces, candidates = null) {
           const r = radial.length();
           if (Math.abs(r - along * face.tan) > Math.max(0.05, r * 0.005)) { fits = false; break; }
           if (r > 1e-6 && normal.dot(radial.normalize()) * sign < 0.3) { fits = false; break; }
+        } else if (face.kind === 'torus') {
+          offset.copy(p).sub(face.point);
+          const along = offset.dot(face.axis);
+          const radial = offset.clone().addScaledVector(face.axis, -along);
+          const d = radial.length();
+          // Distance from the tube's core circle, and the position round the tube.
+          const dr = d - face.major;
+          if (Math.abs(Math.hypot(dr, along) - face.rho) > Math.max(0.05, face.rho * 0.005)) { fits = false; break; }
+          if (face.phi && !withinPhi(face.phi, Math.atan2(along, dr))) { fits = false; break; }
+          // Facing out of the tube for a bead, into it for a fillet.
+          const tubeNormal = radial.normalize().multiplyScalar(dr).addScaledVector(face.axis, along).normalize();
+          if (normal.dot(tubeNormal) * sign < 0.3) { fits = false; break; }
         } else if (face.kind === 'sphere') {
           // Every vertex at the radius, facing outward — OpenSCAD's sphere vertices lie exactly
           // on it, so the tolerance is for arithmetic only.

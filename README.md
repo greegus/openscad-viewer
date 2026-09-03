@@ -695,9 +695,11 @@ OpenSCAD is looked up in this order: `OPENSCAD_PATH` → setting →
   inward like a cut's face). The rims between runs are the edges, and a cone's two grazing lines
   follow the camera exactly, since a cone's normal is constant along a generatrix — and so do a
   cylinder's, on a boss, on the wall of a hole, and on a rounded corner (there only while the
-  grazing direction falls within the arc the corner covers). A curved run
-  would be a torus and has no face yet; a partial `rotate_extrude(angle)` falls back to the box
-  and is marked *bounds only*. `Tests/polyhedron.scad`: cone, frustum, tube and a countersunk board,
+  grazing direction falls within the arc the corner covers). A curved run is a **torus** — a
+  circle revolved is a plain ring with one face and no rim at all, a rounded edge on a turned
+  knob a quarter of one — and its silhouette is sampled round the axis from the same closed-form
+  condition. A partial `rotate_extrude(angle)` still falls back to the box and is marked *bounds
+  only*. `Tests/polyhedron.scad`: cone, frustum, tube, countersunk board, ring and knob,
   every triangle claimed, 48 rim segments per circle.
 - Line overlays behind semi-transparent geometry still show, because transparent materials
   have `depthWrite` off — visible where piece outlines cross the room walls here.

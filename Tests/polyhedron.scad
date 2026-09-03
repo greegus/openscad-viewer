@@ -35,4 +35,8 @@ $fn = 48;
         cube([100, 60, 15]);
         translate([50, 30, 5]) cylinder(h = 11, r1 = 4, r2 = 12);
     }
+    // @name Ring
+    translate([160, 280, 0]) rotate_extrude() translate([30, 0]) circle(10);
+    // @name Knob
+    translate([240, 200, 0]) rotate_extrude() hull() { square([30, 20]); translate([20, 20]) circle(10); }
 // @endgroup

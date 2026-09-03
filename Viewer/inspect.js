@@ -430,7 +430,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     }
     if (target.type === 'body') return { name: 'Body', id: null };
     const kind = target.face?.kind;
-    const name = { cylinder: 'Round face', sphere: 'Spherical face', cone: 'Conical face' }[kind] ?? 'Face';
+    const name = { cylinder: 'Round face', sphere: 'Spherical face', cone: 'Conical face', torus: 'Toroidal face' }[kind] ?? 'Face';
     return { name, id: target.face?.piece?.id ?? null };
   }
 
@@ -479,6 +479,14 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
         ['Size', `${mm(b.x)} × ${mm(b.y)} × ${mm(b.z)} mm`],
         ['Triangles', String(target.triangles.length)],
         ['Note', 'no CSG box — extruded shape'],
+      ];
+    }
+    if (target.face?.kind === 'torus') {
+      return [
+        ['Surface', 'toroidal'],
+        ['Radius', `${mm(target.face.rho)} mm`],
+        ['About', `${mm(target.face.major)} mm from the axis`],
+        ['Triangles', String(target.triangles.length)],
       ];
     }
     if (target.face?.kind === 'cone') {

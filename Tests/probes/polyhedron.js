@@ -43,6 +43,9 @@ return {
   frustum: { faces: faces(6), rimSegments: rims(6), silhouetteLines: sil(6) },
   tube: { faces: faces(7), rimSegments: rims(7), silhouetteLines: sil(7) },
   boardRimSegments: rims(8),
+  // A plain torus: one face, no rim at all, a silhouette. A knob: its rounded edge is a quarter of a torus.
+  ring: { faces: faces(9), rimSegments: rims(9), silhouetteSegments: sil(9) > 0 },
+  knob: { faces: faces(10), rimSegments: rims(10) },
   measured,
   names: c.map((x) => x.name),
   wedge: { faces: (c[1].faces || []).length, edges: (c[1].edges || []).length, claimed: `${cov[1].faces}/${cov[1].inside}` },

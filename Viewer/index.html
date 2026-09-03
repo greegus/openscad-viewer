@@ -1195,6 +1195,8 @@ window.debug = {
       kind: f.kind, label: f.label, radius: f.radius ? Math.round(f.radius) : undefined,
       inward: f.inward, normal: f.normal ? [f.normal.x, f.normal.y, f.normal.z].map((v) => +v.toFixed(2)) : undefined,
       axis: f.axis ? [f.axis.x, f.axis.y, f.axis.z].map((v) => +v.toFixed(2)) : undefined,
+      phi: f.phi ? Object.fromEntries(Object.entries(f.phi).map(([k, v]) => [k, +(v * 180 / Math.PI).toFixed(1)])) : undefined,
+      major: f.major, rho: f.rho,
       point: f.point ? [f.point.x, f.point.y, f.point.z].map((v) => +v.toFixed(1)) : undefined,
       triangles: counts.reduce((n, m) => n + (m.get(f)?.length ?? 0), 0),
     }));
