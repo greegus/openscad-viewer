@@ -1335,6 +1335,7 @@ window.debug = {
   inspect: () => inspect?.debug() ?? null,
   arcs: () => inspect?.arcs() ?? [],
   ellipses: () => inspect?.ellipses() ?? [],
+  patches: (id) => inspect?.patches(id) ?? null,
   arcPoint: (t) => inspect?.arcPoint(t) ?? null,
   probeModifier: (x, y) => inspect?.probeModifier([x, y]) ?? null,
 

@@ -30,6 +30,7 @@ expect "welded side claimed by both" "$(echo "$out" | field "['sideClaims']")" '
 expect "upper board front reads its own size" "$(echo "$out" | field "['upperFrontSize']")" "100 × 500 mm"
 expect "every piece fully covered" "$(echo "$out" | field "['coverage']")"     '["#1 full", "#2 full", "#3 full", "#4 full"]'
 expect "wall ends without the panel" "$(echo "$out" | field "['wallEndTriangles']")" "[6, 6]"
+expect "lower board's covered top is still a face" "$(echo "$out" | field "['lowerTopPatch']")" "2000"
 expect "pieces in several meshes" "$(echo "$out" | field "['inSeveralMeshes']")" "0"
 
 if [ $# -ge 1 ]; then

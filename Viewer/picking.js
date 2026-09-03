@@ -441,6 +441,53 @@ export function sphereSilhouette(piece, camera, segments = 96) {
   return out;
 }
 
+/// Where other pieces rest against a box face of `piece`: the rectangles of contact, as world
+/// triangles, to be added to what the mesh has of that face.
+///
+/// The union removes a surface wherever another solid touches it, so a wall's mesh has a hole
+/// exactly the size of each shelf end resting on it. The wall is still a whole board — the shelf
+/// is only placed against it — and a joiner highlighting the wall expects the whole board. Only
+/// contact from outside counts, and none inside the piece's own cuts: a bottom sitting in a groove
+/// is not resting on the face, it is in the piece.
+export function contactPatches(piece, face, pieces) {
+  if (face.kind !== 'plane' || !face.tag || face.inward || !piece.inverse) return [];
+  const axis = face.tag.axis;
+  const [u, v] = ['x', 'y', 'z'].filter((k) => k !== axis);
+  const atMax = Math.abs(face.tag.at - piece.box.max[axis]) < 1e-6;
+  const at = face.tag.at;
+  const out = [];
+  const corner = new THREE.Vector3();
+  for (const other of pieces) {
+    if (other === piece || other.sphere) continue;
+    // The other piece's box in this piece's space; exact while both are axis-aligned there, and
+    // every joint in practice is.
+    const toLocal = new THREE.Matrix4().multiplyMatrices(piece.inverse, other.world);
+    const box = new THREE.Box3();
+    for (const x of [other.box.min.x, other.box.max.x]) for (const y of [other.box.min.y, other.box.max.y]) for (const z of [other.box.min.z, other.box.max.z]) {
+      box.expandByPoint(corner.set(x, y, z).applyMatrix4(toLocal));
+    }
+    // Touching this face from outside: the other's near side lies in the face's plane.
+    const near = atMax ? box.min[axis] : box.max[axis];
+    if (Math.abs(near - at) > 0.05) continue;
+    const u0 = Math.max(box.min[u], piece.box.min[u]), u1 = Math.min(box.max[u], piece.box.max[u]);
+    const v0 = Math.max(box.min[v], piece.box.min[v]), v1 = Math.min(box.max[v], piece.box.max[v]);
+    if (u1 - u0 < 0.05 || v1 - v0 < 0.05) continue;
+    // Not inside one of this piece's own cuts.
+    const centre = new THREE.Vector3(); centre[axis] = at; centre[u] = (u0 + u1) / 2; centre[v] = (v0 + v1) / 2;
+    const inCut = (piece.cuts ?? []).some((cut) => {
+      const q = centre.clone().applyMatrix4(piece.world).applyMatrix4(cut.worldToCut);
+      return q.x >= cut.box.min.x - 0.05 && q.x <= cut.box.max.x + 0.05
+          && q.y >= cut.box.min.y - 0.05 && q.y <= cut.box.max.y + 0.05
+          && q.z >= cut.box.min.z - 0.05 && q.z <= cut.box.max.z + 0.05;
+    });
+    if (inCut) continue;
+    const pt = (a, b) => { const w = new THREE.Vector3(); w[axis] = at; w[u] = a; w[v] = b; return w.applyMatrix4(piece.world); };
+    const p00 = pt(u0, v0), p10 = pt(u1, v0), p11 = pt(u1, v1), p01 = pt(u0, v1);
+    out.push([p00, p10, p11], [p00, p11, p01]);
+  }
+  return out;
+}
+
 /// Circle through three points in 2D, or null when they are in a line.
 function circleThrough2D(a, b, c) {
   const d = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));

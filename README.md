@@ -171,6 +171,13 @@ bottom's end showing through the wall's groove lies in the plane of the wall's e
 wall's box, and is the bottom's face, not the wall's. A triangle matching no face is left out
 rather than guessed at.
 
+The mesh also has *less* than the face where something rests on it: the union removes a surface
+wherever another solid touches, so a wall's mesh has a hole the size of each shelf end placed
+against it — 3 × 15 × 250 mm² short of 1220 × 450 on the cabinet's side. The wall is still a
+whole board; the shelf is only placed against it. Where another piece's box rests against a box
+face from outside, the rectangle of contact is added to the face as a **patch** (never inside the
+piece's own cuts), and the highlight and the area read the whole board: 5490 cm², not 5377.5.
+
 Where a curve begins is decided the same way for faces and for edges, and the rule took three
 corrections to get right. A vertex turning under 1.5° is tessellation noise on a straight side;
 one turning 30° or more is a corner — without that class a shelf with one rounded corner and

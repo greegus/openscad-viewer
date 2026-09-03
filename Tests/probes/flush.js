@@ -21,7 +21,13 @@ const readout = (() => {
   const text = document.getElementById('readout').innerText;
   return (text.match(/Size\s+([^\n]+)/) || [])[1] ?? text;
 })();
+// The lower board's top is entirely under the upper board: the mesh has none of it, the face
+// is still there, and the contact patch is exactly the board's 100 × 20.
+const lowerTopPatch = (window.debug.patches(lower.id) || []).find((p) => p.normal[1] === 1)?.area ?? 0;
+// The panel sits in the wall's groove, not on the wall: no patch for it on the wall's inner face.
+const wallInnerPatches = (window.debug.patches(wall.id) || []).filter((p) => p.normal[2] === -1).length;
 return {
+  lowerTopPatch, wallInnerPatches,
   upperFrontSize: readout,
   names: c.map((x) => x.name),
   sideClaims: [side(lower.id).triangles > 0, side(upper.id).triangles > 0],

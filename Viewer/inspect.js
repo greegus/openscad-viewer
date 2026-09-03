@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { toScreen, cursorPx, pointToSegment2D, pieceFeatures, featureUnderCursor, sphereSilhouette,
+import { toScreen, cursorPx, pointToSegment2D, pieceFeatures, featureUnderCursor, sphereSilhouette, contactPatches,
          axisName, pieceFaces, assignTriangles, trianglesTouchingBox, trianglesInBox, clipToBox,
          MODEL_TO_WORLD } from './picking.js';
 import { createStroke } from './strokes.js';
@@ -131,10 +131,20 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     // wherever they brush the box, and on kniznica.scad that is 48 of 65 pieces.
     state.pieceTriangles = new Map();
 
+    // Where another piece rests against a face, the mesh has a hole the size of the contact; the
+    // face is still whole, so the contact is kept on it as patches — see `contactPatches`.
+    state.piecePatches = new Map();
+
     for (const piece of state.pieces) {
       const faces = pieceFaces(piece);
       const mine = new Map();
       state.pieceTriangles.set(piece, mine);
+      const patches = [];
+      for (const face of faces) {
+        face.patches = contactPatches(piece, face, state.pieces);
+        patches.push(...face.patches);
+      }
+      state.piecePatches.set(piece, patches);
       for (const mesh of state.meshes) {
         const near = trianglesTouchingBox(mesh, piece.source ?? piece);
         if (!near.length) continue;
@@ -196,10 +206,11 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
 
   /// `piece` limits the face to one piece — see `clipToBox`. Without it, a face welded across
   /// several pieces lights all of them up.
-  function faceGeometry(mesh, triangles, piece) {
+  function faceGeometry(mesh, triangles, piece, patches = []) {
     let points;
     if (piece) {
       points = clipToBox(mesh, triangles, piece.source ?? piece);
+      for (const tri of patches) for (const w of tri) points.push(w.x, w.y, w.z);
     } else {
       const pos = mesh.geometry.attributes.position;
       points = [];
@@ -217,11 +228,15 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
   }
 
   /// Area, in-plane size and orientation of a planar face.
-  function faceInfo(mesh, triangles, normal, piece = null) {
+  function faceInfo(mesh, triangles, normal, piece = null, patches = []) {
     const pos = mesh.geometry.attributes.position;
     const verts = [];
     const v = new THREE.Vector3();
     let area = 0;
+    for (const tri of patches) {
+      verts.push(...tri.map((w) => w.clone()));
+      area += tri[1].clone().sub(tri[0]).cross(tri[2].clone().sub(tri[0])).length() / 2;
+    }
     // Measured on the part within the piece: a triangle of a face can span into the next
     // piece's coplanar face (the cabinet's side above the chest's, welded into one polygon by
     // the union), and unclipped it reported the height of both — 2020 mm for a 1220 mm wall.
@@ -328,6 +343,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
         for (const g of groups) {
           for (const v of clipToBox(g.mesh, g.triangles, target.piece.source ?? target.piece)) positions.push(v);
         }
+        for (const tri of state.piecePatches?.get(target.piece) ?? []) for (const w of tri) positions.push(w.x, w.y, w.z);
         face.geometry.dispose();
         face.geometry = new THREE.BufferGeometry();
         face.geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
@@ -342,7 +358,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     face.geometry.dispose();
     // A face is limited to the piece it belongs to; a body is the whole solid by definition.
     face.geometry = faceGeometry(target.mesh, target.triangles,
-                                 target.type === 'face' ? target.piece : null);
+                                 target.type === 'face' ? target.piece : null, target.face?.patches ?? []);
     face.visible = fills;
     return target.point.clone();   // 'face' and 'body' are both triangle sets
   }
@@ -480,7 +496,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
         ['Triangles', String(target.triangles.length)],
       ];
     }
-    const f = faceInfo(target.mesh, target.triangles, target.normal, target.type === 'face' ? target.piece : null);
+    const f = faceInfo(target.mesh, target.triangles, target.normal, target.type === 'face' ? target.piece : null, target.face?.patches ?? []);
     const axis = axisName(target.normal);
     return [
       ['Size', `${mm(f.width)} × ${mm(f.height)} mm`],
@@ -505,7 +521,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
       const b = bodyBox(target.mesh, target.triangles);
       return `${mm(b.x)} × ${mm(b.y)} × ${mm(b.z)} mm`;
     }
-    const f = faceInfo(target.mesh, target.triangles, target.normal, target.type === 'face' ? target.piece : null);
+    const f = faceInfo(target.mesh, target.triangles, target.normal, target.type === 'face' ? target.piece : null, target.face?.patches ?? []);
     return `${mm(f.width)} × ${mm(f.height)} mm`;
   }
 
@@ -895,6 +911,30 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     return [p.x, p.y, arc.segments.length];
   };
 
+  /// Diagnostic: contact patches per face of a piece — where neighbours rest on it.
+  const patches = (id) => {
+    const piece = state.pieces.find((p) => p.id === id);
+    if (!piece) return null;
+    const out = [];
+    for (const [face, group] of state.faceTriangles) {
+      if (face.piece !== piece || !face.patches?.length) continue;
+      let area = 0;
+      for (const tri of face.patches) area += tri[1].clone().sub(tri[0]).cross(tri[2].clone().sub(tri[0])).length() / 2;
+      out.push({ label: face.label, normal: [face.normal.x, face.normal.y, face.normal.z].map(Math.round), area: Math.round(area) });
+    }
+    // Faces the mesh gave nothing to still carry patches; list those too.
+    const seen = new Set(out.map((o) => o.label + o.normal.join()));
+    for (const face of pieceFaces(piece)) {
+      const p = contactPatches(piece, face, state.pieces);
+      if (!p.length) continue;
+      const key = face.label + [face.normal.x, face.normal.y, face.normal.z].map(Math.round).join();
+      if (seen.has(key)) continue;
+      let area = 0;
+      for (const tri of p) area += tri[1].clone().sub(tri[0]).cross(tri[2].clone().sub(tri[0])).length() / 2;
+      out.push({ label: face.label, normal: [face.normal.x, face.normal.y, face.normal.z].map(Math.round), area: Math.round(area) });
+    }
+    return out;
+  };
   const ellipses = () => state.features.filter((f) => f.type === 'ellipse').map((f) => ({
     a: Math.round(f.a * 10) / 10, b: Math.round(f.b * 10) / 10, segments: f.segments.length,
     length: Math.round(f.length), centre: [f.centre.x, f.centre.y, f.centre.z].map((v) => Math.round(v)),
@@ -907,6 +947,6 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     points: f.points.map((q) => [q.x, q.y, q.z].map((v) => Math.round(v))),
   }));
 
-  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, arcPoint, selection, highlightPiece, highlightPieces, selectPiece, features, longestFeature, edgesInPiece, pieceCoverage, ellipses,
+  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, arcPoint, selection, highlightPiece, highlightPieces, selectPiece, features, longestFeature, edgesInPiece, pieceCoverage, ellipses, patches,
            clear, update, setFills };
 }
