@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { toScreen, cursorPx, pieceFeatures, featureUnderCursor, makeClickDetector } from './picking.js';
+import { toScreen, cursorPx, pieceFeatures, featureUnderCursor, vertexUnderCursor, makeClickDetector } from './picking.js';
 import { createStroke } from './strokes.js';
 
 /// Geometry inspection: snapping to edges and measuring the distance between them.
@@ -39,6 +39,17 @@ export function createMeasure({ scene, view, renderer, readout }) {
   };
   const hoverFace = makeFace(0xffd60a, 0.28);
   const pickFaces = [0, 1].map(() => makeFace(0x22dd77, 0.35));
+  // A picked vertex is a dot of fixed screen size.
+  const makeDot = (color) => {
+    const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3()]);
+    const m = new THREE.Points(g, new THREE.PointsMaterial({ color, size: 11, sizeAttenuation: false, depthTest: false }));
+    m.renderOrder = 23;
+    m.visible = false;
+    scene.add(m);
+    return m;
+  };
+  const hoverDot = makeDot(0xffd60a);
+  const pickDots = [0, 1].map(() => makeDot(0x22dd77));
 
   const dimLine = new THREE.Line(
     new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
@@ -76,6 +87,10 @@ export function createMeasure({ scene, view, renderer, readout }) {
   /// An edge if one is near the cursor, else the face under it. Edges first: they are thin and
   /// always lie on a face, so the face would otherwise swallow them.
   const pick = (px) => {
+    // A vertex first, within a tighter reach: it lies on its edges, which would take it otherwise.
+    const vertex = vertexUnderCursor(px, state.features, view.camera, canvas, 5,
+                                     state.occlude ? state.meshes : null);
+    if (vertex) return { kind: 'point', point: vertex };
     // Six pixels, as Inspect: a wider reach for edges used to make sense when edges were all
     // there was to pick; now it would take the face's rim wherever a face was meant.
     const feature = featureUnderCursor(px, state.features, view.camera, canvas, 6,
@@ -90,11 +105,17 @@ export function createMeasure({ scene, view, renderer, readout }) {
     for (const s of feature.segments) points.push(s.a, s.b);
     line.setPoints(points);
   };
-  const draw = (line, face, item) => {
+  const draw = (line, face, dot, item) => {
     line.visible = false;
     face.visible = false;
+    dot.visible = false;
     if (!item) return;
     if (item.kind === 'edge') { drawFeature(line, item.feature); return; }
+    if (item.kind === 'point') {
+      dot.geometry.setFromPoints([item.point]);
+      dot.visible = true;
+      return;
+    }
     face.geometry.dispose();
     face.geometry = state.faceFill(item.target);
     face.visible = true;
@@ -181,7 +202,12 @@ export function createMeasure({ scene, view, renderer, readout }) {
   const faceName = (t) => ({ cylinder: 'Round face', sphere: 'Spherical face', cone: 'Conical face' }[t.face.kind] ?? 'Face');
   const itemName = (item) => item.kind === 'edge'
     ? (item.feature.type === 'arc' ? `Arc: R ${mm(item.feature.radius)}` : `Edge: ${mm(item.feature.length)}`)
-    : faceName(item.target);
+    : item.kind === 'point' ? 'Vertex' : faceName(item.target);
+
+  /// A pick that stands for a point: a vertex, or a circle's centre — the distance between two
+  /// holes, or from a hole to a corner, is measured between centres, not rims.
+  const asPoint = (item) => item.kind === 'point' ? item.point
+    : item.kind === 'edge' && item.feature.type === 'arc' && item.feature.centre ? item.feature.centre : null;
 
   /// The measurement between two picks, as { distance, from, to, note }.
   ///
@@ -191,6 +217,15 @@ export function createMeasure({ scene, view, renderer, readout }) {
   /// is the shortest connector between the two, with the angle where both have a direction.
   function measurement(x, y) {
     const deg = (a, b) => THREE.MathUtils.radToDeg(Math.acos(Math.min(1, Math.abs(a.dot(b)))));
+    // Points, and circles standing for their centres.
+    const px = asPoint(x), py = asPoint(y);
+    const what = (item) => item.kind === 'point' ? 'vertex' : 'centre';
+    if (px && py && (x.kind === 'point' || y.kind === 'point' || (x.feature.type === 'arc' && y.feature.type === 'arc'))) {
+      const d = px.distanceTo(py);
+      return { distance: d, from: px.clone(), to: py.clone(), note: `${cap(what(x))} to ${what(y)} · distance ${mm(d)}` };
+    }
+    if (px && !py) return pointTo(px, x, y);
+    if (py && !px) { const r = pointTo(py, y, x); return { ...r, from: r.to, to: r.from }; }
     if (x.kind === 'edge' && y.kind === 'edge') {
       const r = featureDistance(x.feature, y.feature);
       const straight = x.feature.type === 'line' && y.feature.type === 'line';
@@ -252,14 +287,40 @@ export function createMeasure({ scene, view, renderer, readout }) {
     return { ...r, note: `Closest · distance ${mm(r.distance)}` };
   }
 
+  const cap = (w) => w[0].toUpperCase() + w.slice(1);
+
+  /// From a point (a vertex, a centre) to an edge or a face.
+  function pointTo(p, source, item) {
+    const what = source.kind === 'point' ? 'Vertex' : 'Centre';
+    if (item.kind === 'edge') {
+      let best = null;
+      for (const seg of item.feature.segments) {
+        const q = new THREE.Line3(seg.a, seg.b).closestPointToPoint(p, true, new THREE.Vector3());
+        const d = p.distanceTo(q);
+        if (!best || d < best.distance) best = { distance: d, from: p.clone(), to: q };
+      }
+      return { ...best, note: `${what} to edge · distance ${mm(best.distance)}` };
+    }
+    const face = item.target.face;
+    if (face.kind === 'plane') {
+      // Straight to the plane, whether or not the foot lands within the face: the height of a
+      // corner above a board is what is asked for.
+      const d = face.point.clone().sub(p).dot(face.normal);
+      const to = p.clone().addScaledVector(face.normal, d);
+      return { distance: Math.abs(d), from: p.clone(), to, note: `${what} to face · distance ${mm(Math.abs(d))}` };
+    }
+    const r = pointsToTriangles([p], faceTriangles(item.target));
+    return { ...r, note: `${what} to face · closest ${mm(r.distance)}` };
+  }
+
   function describe() {
     if (state.picks.length === 0) {
-      readout('Click an edge or a face. A second click measures the distance.');
+      readout('Click a vertex, an edge or a face. A second click measures the distance.');
       dimLine.visible = false; label.hidden = true;
       return;
     }
     if (state.picks.length === 1) {
-      readout(`${itemName(state.picks[0])} — pick a second edge or face`);
+      readout(`${itemName(state.picks[0])} — pick a second vertex, edge or face`);
       dimLine.visible = false; label.hidden = true;
       return;
     }
@@ -284,10 +345,12 @@ export function createMeasure({ scene, view, renderer, readout }) {
     state.picks = [];
     for (const l of pickLines) l.visible = false;
     for (const f of pickFaces) f.visible = false;
+    for (const d of pickDots) d.visible = false;
     dimLine.visible = false;
     label.hidden = true;
     hoverLine.visible = false;
     hoverFace.visible = false;
+    hoverDot.visible = false;
     if (state.enabled) describe();
   }
 
@@ -298,7 +361,7 @@ export function createMeasure({ scene, view, renderer, readout }) {
   canvas.addEventListener('pointermove', (event) => {
     if (!state.enabled) return;
     const item = pick(cursorPx(event, canvas));
-    draw(hoverLine, hoverFace, item);
+    draw(hoverLine, hoverFace, hoverDot, item);
     canvas.style.cursor = item ? 'crosshair' : '';
     // Describe what is under the cursor, as Inspect does — but never overwrite a pick in
     // progress, where the readout is telling you what it is still waiting for.
@@ -307,8 +370,9 @@ export function createMeasure({ scene, view, renderer, readout }) {
         ? (item.kind === 'edge' && item.feature.type === 'arc'
             ? `Arc · R ${mm(item.feature.radius)} · ${(item.feature.sweep * 180 / Math.PI).toFixed(1)}°`
             : item.kind === 'edge' ? `Edge · ${mm(item.feature.length)}`
+            : item.kind === 'point' ? 'Vertex'
             : faceName(item.target))
-        : 'Click an edge or a face. A second click measures the distance.');
+        : 'Click a vertex, an edge or a face. A second click measures the distance.');
     }
   });
 
@@ -320,9 +384,10 @@ export function createMeasure({ scene, view, renderer, readout }) {
       state.picks = [];
       for (const l of pickLines) l.visible = false;
       for (const f of pickFaces) f.visible = false;
+      for (const d of pickDots) d.visible = false;
     }
     state.picks.push(item);
-    draw(pickLines[state.picks.length - 1], pickFaces[state.picks.length - 1], item);
+    draw(pickLines[state.picks.length - 1], pickFaces[state.picks.length - 1], pickDots[state.picks.length - 1], item);
     describe();
   });
 
@@ -345,7 +410,9 @@ export function createMeasure({ scene, view, renderer, readout }) {
     if (!on) {
       hoverLine.visible = false;
       hoverFace.visible = false;
+      hoverDot.visible = false;
       for (const f of pickFaces) f.visible = false;
+      for (const d of pickDots) d.visible = false;
       for (const l of pickLines) l.visible = false;
       dimLine.visible = false;
       label.hidden = true;

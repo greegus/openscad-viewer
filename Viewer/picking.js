@@ -1857,7 +1857,14 @@ function makeFeature(points, curved) {
   for (let i = 0; i < points.length - 1; i++) segments.push({ a: points[i], b: points[i + 1] });
 
   if (curved && points.length >= 4) {
-    const fit = circleThrough(points[0], points[Math.floor(points.length / 2)], points[points.length - 1]);
+    // A closed loop — the rim of a hole — ends where it starts, so its two ends cannot both be
+    // fit points; three points a third of the way round each are. (The same trap as in the
+    // face runs: a circle came out as a "line" of 48 segments.)
+    const closed = points[0].distanceTo(points[points.length - 1]) < 0.05;
+    const third = Math.floor(points.length / 3);
+    const fit = closed
+      ? circleThrough(points[0], points[third], points[2 * third])
+      : circleThrough(points[0], points[Math.floor(points.length / 2)], points[points.length - 1]);
     if (fit) {
       const tolerance = Math.max(0.05, fit.radius * 0.005);
       const onCircle = points.every((p) => Math.abs(p.distanceTo(fit.centre) - fit.radius) < tolerance);
@@ -1985,6 +1992,32 @@ function solveLinear(m) {
 }
 
 /// Nearest feature to the cursor, honouring occlusion the same way `edgeUnderCursor` does.
+/// The vertex — an end of some edge — nearest the cursor within `threshold` pixels, honouring
+/// occlusion like `featureUnderCursor`. A vertex is where a distance is often wanted from: the
+/// corner of a board, the end of a groove.
+export function vertexUnderCursor(px, features, camera, canvas, threshold = 6, occluders = null) {
+  const candidates = [];
+  const seen = new Set();
+  for (const f of features) {
+    const first = f.segments[0].a, last = f.segments[f.segments.length - 1].b;
+    if (first.distanceTo(last) < 0.05) continue;       // a closed circle: its seam is no vertex
+    for (const v of [first, last]) {
+      const key = `${v.x.toFixed(2)},${v.y.toFixed(2)},${v.z.toFixed(2)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const d = toScreen(v, camera, canvas).distanceTo(px);
+      if (d < threshold) candidates.push({ distance: d, point: v.clone() });
+    }
+  }
+  candidates.sort((x, y) => x.distance - y.distance);
+  if (!occluders?.length) return candidates[0]?.point ?? null;
+  const raycaster = new THREE.Raycaster();
+  for (const c of candidates) {
+    if (isVisible(c.point, camera, canvas, raycaster, occluders)) return c.point;
+  }
+  return null;
+}
+
 export function featureUnderCursor(px, features, camera, canvas, threshold = 14, occluders = null) {
   const candidates = [];
   for (const f of features) {

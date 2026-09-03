@@ -28,7 +28,10 @@ expect "cone"    "$(echo "$out" | field "['cone']")"    '{"faces": ["plane:botto
 expect "frustum" "$(echo "$out" | field "['frustum']")" '{"faces": ["plane:bottom", "cone:cone", "plane:top"], "rimSegments": 96, "silhouetteLines": 2}'
 expect "tube"    "$(echo "$out" | field "['tube']")"    '{"faces": ["plane:bottom", "cylinder:side", "plane:top", "cylinder:bore"], "rimSegments": 192, "silhouetteLines": 4}'
 expect "countersunk board rims" "$(echo "$out" | field "['boardRimSegments']")" "108"
-expect "measure board top to frustum top" "$(echo "$out" | field "['measured']")" "Parallel faces · distance 25.0 mm"
+expect "measure board top to frustum top" "$(echo "$out" | field "['measured']['faces']")" "Parallel faces · distance 25.0 mm"
+expect "measure corner to corner"          "$(echo "$out" | field "['measured']['vertices']")" "Vertex to vertex · distance 102.0 mm"
+expect "measure rim centre to rim centre"  "$(echo "$out" | field "['measured']['centres']")" "Centre to centre · distance 80.6 mm"
+expect "measure corner to face"            "$(echo "$out" | field "['measured']['vertexFace']")" "Vertex to face · distance 25.0 mm"
 
 echo "Tests/flush.scad"
 out=$(Tests/probe.sh Tests/flush.scad Tests/probes/flush.js) || { echo "  probe failed: $out"; exit 1; }

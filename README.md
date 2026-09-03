@@ -403,7 +403,10 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
   under the cursor; it was 14 px while edges were all there was, which then took a face's rim
   wherever the face was meant). A click picks an edge, or — with no edge near — the **face**
   under the cursor, the same CSG face Inspect shows, lent by Inspect so both tools mean the same
-  thing. A second click measures. Two straight edges: the shortest connector between the
+  thing; a **vertex** — the end of an edge, within 5 px — takes precedence over both, since it
+  lies on them. A circle picked as an edge stands for its **centre** where the other pick is a
+  point or another circle: the distance between two holes is between centres, not rims. A second
+  click measures. Two straight edges: the shortest connector between the
   **segments** (not lines), so edges that pass each other work too; parallel ones are a pitch,
   otherwise the angle is added. Two parallel planes: the distance between the planes, drawn from
   the picked point straight across — the shelf pitch and the clear width between two sides. Two
@@ -412,7 +415,8 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
   closest pair of points, with the angle where both have a direction. A click is told from a
   drag by movement < 4 px and < 400 ms, so OrbitControls keep working. Esc clears. Both tools
   share the picking helpers in `Web/picking.js`. Verified against the model: shelf tops at
-  1150 → 1455 mm measured exactly 305 mm, by edge and by face alike.
+  1150 → 1455 mm measured exactly 305 mm, by edge and by face alike; on `Tests/polyhedron.scad`
+  corner to corner 102.0, rim centre to rim centre 80.6, corner to face 25.0.
 
 ## Other decisions
 

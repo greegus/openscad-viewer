@@ -19,10 +19,23 @@ const measured = (() => {
     window.debug.snapshot();
     return document.getElementById('readout').innerText.replace(/\s+/g, ' ').trim();
   };
+  const esc = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
   click([25, 310, 15]);
-  const text = click([80, 200, 40]);
+  const faces = click([80, 200, 40]);
+  esc();
+  // Two corners: (40, 0, 40) of the cube and (100, 80, 20) of the second — √(60² + 80² + 20²).
+  click([40, 0, 40]);
+  const vertices = click([100, 80, 20]);
+  esc();
+  // Two rims stand for their centres: the tube's (160, 200, 30) and the frustum's (80, 200, 40).
+  click([160, 170, 30]);
+  const centres = click([80, 190, 40]);
+  esc();
+  // A corner to a face: the cube's top corner above the board's top, 40 − 15.
+  click([40, 0, 40]);
+  const vertexFace = click([25, 310, 15]);
   setTool('inspect');
-  return text;
+  return { faces, vertices, centres, vertexFace };
 })();
 return {
   revolvedCoverage: cov.slice(4).map((r) => `${r.faces}/${r.inside}`),
