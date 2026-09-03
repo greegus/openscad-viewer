@@ -871,6 +871,11 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     return segments;
   };
 
+  const triangleArea = (mesh, tri) => {
+    const pos = mesh.geometry.attributes.position;
+    const a = new THREE.Vector3().fromBufferAttribute(pos, tri * 3), b = new THREE.Vector3().fromBufferAttribute(pos, tri * 3 + 1), c = new THREE.Vector3().fromBufferAttribute(pos, tri * 3 + 2);
+    return b.sub(a).cross(c.sub(a)).length() / 2;
+  };
   const pieceCoverage = () => state.pieces.map((piece) => {
     const byMesh = state.pieceTriangles?.get(piece);
     const fromFaces = byMesh ? [...byMesh.values()].reduce((n, t) => n + t.length, 0) : 0;
@@ -881,7 +886,9 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     let touching = 0, inside = 0;
     for (const mesh of state.meshes) {
       touching = Math.max(touching, trianglesTouchingBox(mesh, piece.source ?? piece).length);
-      inside = Math.max(inside, trianglesInBox(mesh, piece.source ?? piece).length);
+      // Degenerate triangles (CGAL leaves a few with two vertices the same round a rim) have no
+      // normal and no face; they are not "uncovered", so they are not counted.
+      inside = Math.max(inside, trianglesInBox(mesh, piece.source ?? piece).filter((tri) => triangleArea(mesh, tri) > 0.01).length);   // below a hundredth of a mm² a sliver has no reliable normal either
     }
     return { id: piece.id, faces: fromFaces, meshes, box: touching, inside };
   });

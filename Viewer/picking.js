@@ -261,7 +261,9 @@ export function pieceFaces(piece) {
   piece.cuts = [];
   for (const cut of source.cutters ?? []) {
     const box = prepareBox(cut);
-    if (!cut.profile) {
+    // Box cuts only: a round or conical cut's box is not the cut, and subtracting it would take
+    // the face around a countersink with it.
+    if (!cut.profile && !cut.revolve && !cut.sphere) {
       const cutToPiece = new THREE.Matrix4().multiplyMatrices(piece.inverse, MODEL_TO_WORLD).multiply(box.matrix);
       piece.cuts.push({ box, worldToCut: cutToPiece.clone().invert().multiply(piece.inverse) });
     }
@@ -868,13 +870,19 @@ export function assignTriangles(mesh, faces, candidates = null) {
           // Along the plane the clipping stays exact, which is what keeps the touching wall out.
           const into = face.normal.clone().multiplyScalar(face.inward ? 0.25 : -0.25);
           let area = clippedArea(a, b, c, piece.box, piece.inverse, into);
+          // "Has area inside" is relative to the triangle's own: CGAL leaves slivers of a few
+          // thousandths of a square millimetre round a rim, wholly inside the face, and an
+          // absolute threshold refused them. A neighbour's triangle touching along an edge
+          // still has none of its (large) area inside.
+          const own = normal.length() > 0 ? b.clone().sub(a).cross(c.clone().sub(a)).length() / 2 : 0;
+          const enough = Math.min(0.01, own * 0.5);
           // Minus what lies inside a cut: a groove is not the piece's material, and the end of
           // the drawer bottom showing through the wall's groove is the bottom's face, not the
           // wall's. Only box cuts — a round hole's box would take the whole top of a drilled cube.
-          if (!face.inward && area >= 0.01) {
+          if (!face.inward && area >= enough) {
             for (const cut of piece.cuts ?? []) area -= clippedArea(a, b, c, cut.box, cut.worldToCut, into);
           }
-          if (area < 0.01) continue;
+          if (area < enough || own < 1e-9) continue;
         } else {
           local.copy(centroid).applyMatrix4(piece.inverse);
           const bx = piece.box;
@@ -948,7 +956,7 @@ export function assignTriangles(mesh, faces, candidates = null) {
 
 /// Area of the part of triangle abc (world) that lies inside `box` (in the space `inverse` maps
 /// into) — the triangle clipped to the box's six half-spaces, then measured.
-function clippedArea(a, b, c, box, inverse, shift = null) {
+export function clippedArea(a, b, c, box, inverse, shift = null) {
   let poly = [a, b, c].map((p) => (shift ? p.clone().add(shift) : p.clone()).applyMatrix4(inverse));
   for (const axis of ['x', 'y', 'z']) {
     for (const side of [-1, 1]) {

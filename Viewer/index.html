@@ -152,7 +152,7 @@ import { STLLoader } from './vendor/STLLoader.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { createMeasure } from './measure.js';
 import { createInspect } from './inspect.js';
-import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, sphereSilhouette, pieceSilhouette, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
+import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, sphereSilhouette, pieceSilhouette, clippedArea, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
 import { updateStrokeResolution } from './strokes.js';
 import { createGrid } from './grid.js';
 import { createPalette } from './palette.js';
@@ -1082,6 +1082,21 @@ window.debug = {
     return out;
   },
   pieceCoverage: () => inspect?.pieceCoverage() ?? null,
+  /// Why a triangle (by its world vertices) is refused by each plane face of a piece.
+  whyUnclaimed: (id, verts) => {
+    const piece = pieceModel.find((p) => p.id === id);
+    const faces = pieceFaces(piece);
+    const [a, b, c] = verts.map((v) => new THREE.Vector3(...v));
+    const normal = b.clone().sub(a).cross(c.clone().sub(a)).normalize();
+    return faces.filter((f) => f.kind === 'plane').map((f) => {
+      const sign = f.inward ? -1 : 1;
+      const dist = Math.max(...[a, b, c].map((p) => Math.abs(p.clone().sub(f.point).dot(f.normal))));
+      const into = f.normal.clone().multiplyScalar(f.inward ? 0.25 : -0.25);
+      let area = clippedArea(a, b, c, piece.box, piece.inverse, into);
+      const cutArea = (piece.cuts ?? []).map((cut) => clippedArea(a, b, c, cut.box, cut.worldToCut, into));
+      return { label: f.label, nDot: +(normal.dot(f.normal) * sign).toFixed(3), dist: +dist.toFixed(3), area: +area.toFixed(2), cutArea: cutArea.map((v) => +v.toFixed(2)) };
+    }).filter((r) => r.nDot > 0.9);
+  },
   cutsOf: (id) => {
     const piece = pieceModel.find((p) => p.id === id);
     if (!piece) return null;
