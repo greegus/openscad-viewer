@@ -20,9 +20,15 @@ expect "grazing lines in the two holes" "$(echo "$out" | field "['silhouetteLine
 
 echo "Tests/polyhedron.scad"
 out=$(Tests/probe.sh Tests/polyhedron.scad Tests/probes/polyhedron.js) || { echo "  probe failed: $out"; exit 1; }
-expect "names in order"  "$(echo "$out" | field "['names']")" '["Cube", "Wedge", "Ball", "Second cube"]'
+expect "names in order"  "$(echo "$out" | field "['names']")" '["Cube", "Wedge", "Ball", "Second cube", "Cone", "Frustum", "Tube", "Countersunk board"]'
 expect "wedge"           "$(echo "$out" | field "['wedge']")" '{"claimed": "8/8", "edges": 9, "faces": 5}'
 expect "ball"            "$(echo "$out" | field "['ball']")" '{"claimed": "2300/2300", "faces": ["sphere:2300/r20"], "silhouetteRadius": 20, "silhouetteSegments": 96, "staticEdges": 0}'
+expect "every triangle of the revolved solids claimed" "$(echo "$out" | field "['revolvedCoverage']")" '["94/94", "188/188", "384/384", "300/300"]'
+expect "cone"    "$(echo "$out" | field "['cone']")"    '{"faces": ["plane:bottom", "cone:cone"], "rimSegments": 48, "silhouetteLines": 2}'
+expect "frustum" "$(echo "$out" | field "['frustum']")" '{"faces": ["plane:bottom", "cone:cone", "plane:top"], "rimSegments": 96, "silhouetteLines": 2}'
+expect "tube"    "$(echo "$out" | field "['tube']")"    '{"faces": ["plane:bottom", "cylinder:side", "plane:top", "cylinder:bore"], "rimSegments": 192, "silhouetteLines": 4}'
+expect "countersunk board rims" "$(echo "$out" | field "['boardRimSegments']")" "108"
+expect "measure board top to frustum top" "$(echo "$out" | field "['measured']")" "Parallel faces · distance 25.0 mm"
 
 echo "Tests/flush.scad"
 out=$(Tests/probe.sh Tests/flush.scad Tests/probes/flush.js) || { echo "  probe failed: $out"; exit 1; }
@@ -33,16 +39,6 @@ expect "every piece fully covered" "$(echo "$out" | field "['coverage']")"     '
 expect "wall ends without the panel" "$(echo "$out" | field "['wallEndTriangles']")" "[6, 6]"
 expect "lower board's covered top is still a face" "$(echo "$out" | field "['lowerTopPatch']")" "2000"
 expect "pieces in several meshes" "$(echo "$out" | field "['inSeveralMeshes']")" "0"
-
-echo "Tests/cone.scad"
-out=$(Tests/probe.sh Tests/cone.scad Tests/probes/cone.js) || { echo "  probe failed: $out"; exit 1; }
-expect "names in order"  "$(echo "$out" | field "['names']")"    '["Cone", "Frustum", "Tube", "Countersunk board"]'
-expect "every triangle claimed" "$(echo "$out" | field "['coverage']")" '["94/94", "188/188", "384/384", "300/300"]'
-expect "cone"    "$(echo "$out" | field "['cone']")"    '{"faces": ["plane:bottom", "cone:cone"], "rimSegments": 48, "silhouetteLines": 2}'
-expect "frustum" "$(echo "$out" | field "['frustum']")" '{"faces": ["plane:bottom", "cone:cone", "plane:top"], "rimSegments": 96, "silhouetteLines": 2}'
-expect "tube"    "$(echo "$out" | field "['tube']")"    '{"faces": ["plane:bottom", "cylinder:side", "plane:top", "cylinder:bore"], "rimSegments": 192, "silhouetteLines": 4}'
-expect "countersunk board" "$(echo "$out" | field "['board']['rimSegments']")" "108"
-expect "measure board top to frustum top" "$(echo "$out" | field "['measured']")" "Parallel faces · distance 25.0 mm"
 
 if [ $# -ge 1 ]; then
   echo "$1"

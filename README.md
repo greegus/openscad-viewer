@@ -693,7 +693,7 @@ OpenSCAD is looked up in this order: `OPENSCAD_PATH` → setting →
   cylinder's, on a boss, on the wall of a hole, and on a rounded corner (there only while the
   grazing direction falls within the arc the corner covers). A curved run
   would be a torus and has no face yet; a partial `rotate_extrude(angle)` falls back to the box
-  and is marked *bounds only*. `Tests/cone.scad`: cone, frustum, tube and a countersunk board,
+  and is marked *bounds only*. `Tests/polyhedron.scad`: cone, frustum, tube and a countersunk board,
   every triangle claimed, 48 rim segments per circle.
 - Line overlays behind semi-transparent geometry still show, because transparent materials
   have `depthWrite` off — visible where piece outlines cross the room walls here.

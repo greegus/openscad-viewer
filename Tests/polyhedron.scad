@@ -1,9 +1,12 @@
-// A wedge as a polyhedron beside a cube, plus a sphere.
+// Every kind of solid the reader knows, side by side: a cube, a wedge (polyhedron), a ball
+// (sphere), and the solids of revolution — a cone, a frustum, a tube, a countersunk hole.
 //
-// None of these has an outline the CSG reader can describe, and a piece it cannot describe used
-// to vanish: absent from the parts list, unpickable, and — since names are matched to geometry
-// by order — shifting every name after it by one. Each is now a piece bounded by its box and
-// marked approximate, so the list stays complete and the names stay on the right pieces.
+// The wedge and the ball once had no outline the CSG reader could describe, and a piece it could
+// not describe used to vanish: absent from the parts list, unpickable, and — since names are
+// matched to geometry by order — shifting every name after it by one. The wedge now states its
+// faces and edges, the ball is one spherical face drawn by its silhouette, and a cylinder with
+// two radii or a rotate_extrude is the revolution of a profile: each straight run one face, the
+// rims between them the edges, a cone's grazing lines following the camera.
 
 // @group Test
     // @name Cube
@@ -16,4 +19,20 @@
     translate([20, 80, 20]) sphere(r = 20, $fn = 48);
     // @name Second cube
     translate([60, 80, 0]) cube([40, 40, 20]);
+// @endgroup
+
+$fn = 48;
+
+// @group Revolved
+    // @name Cone
+    translate([0, 200, 0]) cylinder(h = 50, r1 = 30, r2 = 0);
+    // @name Frustum
+    translate([80, 200, 0]) cylinder(h = 40, r1 = 30, r2 = 10);
+    // @name Tube
+    translate([160, 200, 0]) rotate_extrude() translate([20, 0]) square([10, 30]);
+    // @name Countersunk board
+    translate([0, 280, 0]) difference() {
+        cube([100, 60, 15]);
+        translate([50, 30, 5]) cylinder(h = 11, r1 = 4, r2 = 12);
+    }
 // @endgroup
