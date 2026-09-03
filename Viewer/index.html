@@ -152,7 +152,7 @@ import { STLLoader } from './vendor/STLLoader.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { createMeasure } from './measure.js';
 import { createInspect } from './inspect.js';
-import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, sphereSilhouette, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
+import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, sphereSilhouette, pieceSilhouette, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
 import { updateStrokeResolution } from './strokes.js';
 import { createGrid } from './grid.js';
 import { createPalette } from './palette.js';
@@ -687,7 +687,7 @@ function buildEdgeOverlay(pieces) {
 let silhouetteLines = null;
 let silhouetteCameraKey = '';
 function updateSilhouettes() {
-  const spheres = pieceModel.filter((p) => p.sphere);
+  const spheres = pieceModel.filter((p) => p.sphere || p.revolve);
   if (!spheres.length) {
     if (silhouetteLines) { scene.remove(silhouetteLines); silhouetteLines.geometry.dispose(); silhouetteLines = null; }
     return;
@@ -696,7 +696,7 @@ function updateSilhouettes() {
   if (key === silhouetteCameraKey && silhouetteLines) { silhouetteLines.visible = edgesOn; return; }
   silhouetteCameraKey = key;
   const points = [];
-  for (const piece of spheres) for (const p of sphereSilhouette(piece, view.camera)) points.push(p.x, p.y, p.z);
+  for (const piece of spheres) for (const p of pieceSilhouette(piece, view.camera)) points.push(p.x, p.y, p.z);
   if (!silhouetteLines) {
     silhouetteLines = new THREE.LineSegments(new THREE.BufferGeometry(), edgeMaterial());
     scene.add(silhouetteLines);
@@ -1091,8 +1091,8 @@ window.debug = {
   /// A sphere's silhouette as currently drawn: segment count and the radius of the ring.
   silhouette: (id) => {
     const piece = pieceModel.find((p) => p.id === id);
-    if (!piece?.sphere) return null;
-    const pts = sphereSilhouette(piece, view.camera);
+    if (!piece || !(piece.sphere || piece.revolve)) return null;
+    const pts = pieceSilhouette(piece, view.camera);
     const c = pts.reduce((acc, p) => acc.add(p), new THREE.Vector3()).divideScalar(pts.length || 1);
     return { segments: pts.length / 2, radius: pts.length ? +pts[0].distanceTo(c).toFixed(2) : 0 };
   },

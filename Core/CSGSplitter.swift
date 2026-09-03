@@ -140,6 +140,13 @@ extension CSGSplitter {
         /// own, drawn by its silhouette.
         var sphere: Double?
 
+        /// A solid of revolution — a cone, a `rotate_extrude` — as the profile it revolves about
+        /// the box's own z axis, which runs through the box's centre: `[[r, z], …]` in box
+        /// coordinates. A cylinder with two radii is the revolution of a trapezoid.
+        var revolve: [[Double]]?
+        /// Segments per full turn, as OpenSCAD tessellated it, so rims land on the mesh.
+        var fragments: Int?
+
         init(matrix: [Double], size: [Double], centered: Bool, approximate: Bool = false,
              profile: [[Double]]? = nil) {
             self.matrix = matrix
@@ -258,7 +265,7 @@ extension CSGSplitter {
                 out.append(box)
                 return
             }
-            if let box = bounded(n, current) { out.append(box); return }
+            if var box = bounded(n, current) { box.approximate = true; out.append(box); return }
             for child in n.children { collectBoxes(child, current, into: &out) }
         }
 
@@ -340,7 +347,7 @@ extension CSGSplitter {
         /// board.
         func extent(_ c: Component) -> (min: [Double], max: [Double])? {
             // Nor is a bounds-only piece: rebuilding it as a box would drop the flag that says so.
-            guard c.cutters.isEmpty, c.profile == nil, !c.box.approximate, c.box.faces == nil, c.box.sphere == nil else { return nil }
+            guard c.cutters.isEmpty, c.profile == nil, !c.box.approximate, c.box.faces == nil, c.box.sphere == nil, c.box.revolve == nil else { return nil }
             let m = c.box.matrix
             let axisAligned = [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]]
             guard zip(axisAligned, [1.0, 0, 0, 0, 1, 0, 0, 0, 1]).allSatisfy({ abs($0 - $1) < tolerance })
@@ -869,14 +876,41 @@ extension CSGSplitter {
                                              0, 0, 0, 1])
         let box = Box(matrix: placement, size: [radius * 2, radius * 2, height], centered: false)
 
-        guard abs(low - high) < 1e-9 else { return (box, nil) }
-        let sides = Int(numbers["$fn"] ?? 0)
-        let n = sides >= 3 ? sides : 32
+        let n = fragments(radius, numbers)
+        guard abs(low - high) < 1e-9 else {
+            // Two radii: a cone, or a frustum — the revolution of a trapezoid about the axis.
+            var cone = box
+            var profile: [[Double]] = [[0, 0]]
+            if low > 0 { profile.append([low, 0]) }
+            profile.append([high, height])
+            if high > 0 { profile.append([0, height]) }
+            cone.revolve = profile
+            cone.fragments = n
+            return (cone, nil)
+        }
         let profile = (0..<n).map { i -> [Double] in
             let a = 2 * Double.pi * Double(i) / Double(n)
             return [radius + radius * cos(a), radius + radius * sin(a)]
         }
         return (box, profile)
+    }
+
+    /// A `rotate_extrude` as the revolution of its 2D outline about z. Only a full turn, and only
+    /// when the outline is a single shape on the positive side of the axis; anything else falls
+    /// back to the bounding box.
+    private static func revolved(_ node: Node, _ transform: [Double]) -> Box? {
+        let numbers = named(in: node.args)
+        if let angle = numbers["angle"], abs(angle - 360) > 1e-6 { return nil }
+        guard let outline = profile(of: node), outline.count >= 3,
+              outline.allSatisfy({ $0[0] >= -1e-6 }) else { return nil }
+        let radius = outline.map { $0[0] }.max() ?? 0
+        let zMin = outline.map { $0[1] }.min() ?? 0, zMax = outline.map { $0[1] }.max() ?? 0
+        guard radius > 0, zMax > zMin else { return nil }
+        let placement = multiply(transform, [1, 0, 0, -radius, 0, 1, 0, -radius, 0, 0, 1, zMin, 0, 0, 0, 1])
+        var box = Box(matrix: placement, size: [2 * radius, 2 * radius, zMax - zMin], centered: false)
+        box.revolve = outline.map { [Swift.max(0, $0[0]), $0[1] - zMin] }
+        box.fragments = fragments(radius, numbers)
+        return box
     }
 
     /// The bounding box of a solid this reader cannot describe exactly, flagged as such — or nil
@@ -908,6 +942,7 @@ extension CSGSplitter {
             box.sphere = r
             return box
         case "rotate_extrude":
+            if let exact = revolved(node, transform) { return exact }
             // The profile sweeps round z: its x extent is the radius, its y extent the height.
             var shape: (min: [Double], max: [Double])?
             for child in node.children { shape = union(shape, shape2D(child, identity)) }

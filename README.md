@@ -680,9 +680,15 @@ OpenSCAD is looked up in this order: `OPENSCAD_PATH` → setting →
   with no edge anywhere on it, so nothing static is drawn for it; what a drawing shows of a
   sphere is its **silhouette** — the circle where the view grazes it, smaller than the great
   circle under perspective and pushed toward the eye — and that is recomputed as the camera
-  moves, in the edge overlay and in a highlight alike, as Fusion does it. A `rotate_extrude` is
-  still bounded by its box and marked *bounds only*: it stays in the list and keeps the names
-  after it in place, but its faces and edges are the box's, not its own.
+  moves, in the edge overlay and in a highlight alike, as Fusion does it. A cylinder with two
+  radii and a `rotate_extrude` are **solids of revolution**: the profile is divided into runs the
+  same way an extrusion's outline is, and each straight run is one face — a vertical run a
+  cylinder, a horizontal one an annulus, a slanted one a cone (with an inner wall, a bore, marked
+  inward like a cut's face). The rims between runs are the edges, and a cone's two grazing lines
+  follow the camera exactly, since a cone's normal is constant along a generatrix. A curved run
+  would be a torus and has no face yet; a partial `rotate_extrude(angle)` falls back to the box
+  and is marked *bounds only*. `Tests/cone.scad`: cone, frustum, tube and a countersunk board,
+  every triangle claimed, 48 rim segments per circle.
 - Line overlays behind semi-transparent geometry still show, because transparent materials
   have `depthWrite` off — visible where piece outlines cross the room walls here.
 - Semi-transparent geometry in the design (the room walls here) draws over everything

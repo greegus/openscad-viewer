@@ -156,6 +156,7 @@ export function buildPieceModel(components) {
     const origin = [c.matrix[3], c.matrix[7], c.matrix[11]];
     return {
       id: c.id, name: c.name, groups: c.groups ?? [], source: c, sphere: c.sphere ?? null,
+      revolve: c.revolve ?? null, fragments: c.fragments ?? 32,
       size: c.size, world, inverse: world.clone().invert(), outline,
       corner: c.centered ? origin.map((v, i) => v - c.size[i] / 2) : origin,
       box: new THREE.Box3(min, min.clone().add(new THREE.Vector3(sx, sy, sz))),
@@ -203,8 +204,16 @@ export function pieceFaces(piece) {
     point: centre.clone().applyMatrix4(toWorld),
     piece,
   });
+  /// A cone about `axis` from `apex`, widening at `tan` per unit along it, over the axial range
+  /// [from, to] from the apex.
+  const cone = (apex, axis, tan, from, to, label, inward = false) => faces.push({
+    kind: 'cone', label, tan, from, to, inward,
+    point: apex.clone().applyMatrix4(toWorld),
+    axis: axis.clone().transformDirection(toWorld).normalize(),
+    piece,
+  });
 
-  addSurfaces(source, piece.box, plane, cylinder, '', sphere);
+  addSurfaces(source, piece.box, plane, cylinder, '', sphere, cone);
 
   // A cut that only touches a face splits it. Where two cylinders each graze the same wall the
   // wall has zero thickness at their crossing, and a B-rep kernel reports that by dividing the
@@ -250,11 +259,99 @@ export function pieceFaces(piece) {
       .multiply(box.matrix);
     const place = (v) => v.clone().applyMatrix4(cutToPiece);
     const dir = (v) => v.clone().transformDirection(cutToPiece);
+    // A cut's faces look into the hole: the cutter's outer wall is an inward face of the piece,
+    // and a bore through the cutter (material left standing inside) would be an outward one.
     addSurfaces(cut, box, (p0, n, label) => plane(place(p0), dir(n), label, null, true),
-                (p0, axis, radius, label) => cylinder(place(p0), dir(axis), radius, label, true),
-                'cut ');
+                (p0, axis, radius, label, inwardOfCutter = false) => cylinder(place(p0), dir(axis), radius, label, !inwardOfCutter),
+                'cut ', null,
+                (apex, axis, tan, from, to, label, inwardOfCutter = false) => cone(place(apex), dir(axis), tan, from, to, label, !inwardOfCutter));
   }
   return faces;
+}
+
+/// The revolve profile of a piece as (r, z) points wound counter-clockwise, so that the outward
+/// normal of the edge a→b is (dz, −dr) — outward radially when it points away from the axis.
+function revolveProfile(source) {
+  const pts = source.revolve.map(([r, z]) => new THREE.Vector2(r, z));
+  let area = 0;
+  for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; area += a.x * b.y - b.x * a.y; }
+  return area < 0 ? pts.reverse() : pts;
+}
+
+/// The faces of a solid of revolution, one per straight run of its profile: a vertical run is
+/// a cylinder, a horizontal one a plane (an annulus), a slanted one a cone. A run whose normal
+/// points at the axis is an inner wall — a tube's bore — and is marked inward like a cut's face.
+/// A curved run would be a torus, which has no face here yet.
+function revolveSurfaces(source, box, plane, cylinder, cone, prefix) {
+  const { min, max } = box;
+  const centre = new THREE.Vector2((min.x + max.x) / 2, (min.y + max.y) / 2);
+  const profile = revolveProfile(source);
+  const { runs, at } = profileRuns(profile.map((p) => [p.x, p.y]));
+  const up = new THREE.Vector3(0, 0, 1);
+  for (const run of runs) {
+    if (run.curved) continue;
+    const a = at(run.start), b = at(run.end);
+    if (a.x < 1e-6 && b.x < 1e-6) continue;                       // the axis itself
+    const dr = b.x - a.x, dz = b.y - a.y;
+    const outwardR = dz, outwardZ = -dr;                           // (dz, −dr) for a CCW profile
+    if (Math.abs(dz) < 1e-6) {
+      // Annulus at height z.
+      plane(new THREE.Vector3(centre.x, centre.y, min.z + a.y), new THREE.Vector3(0, 0, Math.sign(outwardZ)), prefix + (outwardZ > 0 ? 'top' : 'bottom'));
+    } else if (Math.abs(dr) < 1e-6) {
+      cylinder(new THREE.Vector3(centre.x, centre.y, min.z), up, a.x, prefix + (outwardR > 0 ? 'side' : 'bore'), outwardR < 0);
+    } else if (cone) {
+      // The apex is where the radius would reach zero; the axis is taken from the apex toward
+      // the wider end, so the radius grows along it.
+      const zApex = a.y - a.x * dz / dr;
+      const widening = (a.x < b.x) === (a.y < b.y);               // radius grows with z?
+      const axis = new THREE.Vector3(0, 0, widening ? 1 : -1);
+      const s1 = Math.abs(a.y - zApex), s2 = Math.abs(b.y - zApex);
+      cone(new THREE.Vector3(centre.x, centre.y, min.z + zApex), axis, Math.abs(dr / dz),
+           Math.min(s1, s2), Math.max(s1, s2), prefix + (outwardR > 0 ? 'cone' : 'bore'), outwardR < 0);
+    }
+  }
+}
+
+/// The rims of a solid of revolution: a circle at every run boundary of its profile with a
+/// radius — an edge between two faces, whether a corner or the tangent where a cone meets a
+/// cylinder — in the box's coordinates.
+function revolveRims(source, box, fragments, zLow = -Infinity, zHigh = Infinity) {
+  const { min, max } = box;
+  const centre = new THREE.Vector2((min.x + max.x) / 2, (min.y + max.y) / 2);
+  const profile = revolveProfile(source);
+  const { runs, at } = profileRuns(profile.map((p) => [p.x, p.y]));
+  const rims = [];
+  const seen = new Set();
+  const add = (r, z) => {
+    if (r < 1e-6 || z < zLow - 1e-6 || z > zHigh + 1e-6) return;
+    const key = `${r.toFixed(4)}:${z.toFixed(4)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    rims.push({ r, z });
+  };
+  for (const run of runs) { const v = at(run.start); add(v.x, v.y); }
+  // Where the depth range cuts a slanted or vertical run, the rim is the circle at that depth.
+  for (const run of runs) {
+    if (run.curved) continue;
+    const a = at(run.start), b = at(run.end);
+    for (const z of [zLow, zHigh]) {
+      if (!Number.isFinite(z)) continue;
+      const lo = Math.min(a.y, b.y), hi = Math.max(a.y, b.y);
+      if (z <= lo + 1e-6 || z >= hi - 1e-6) continue;
+      add(a.x + (b.x - a.x) * (z - a.y) / (b.y - a.y), z);
+    }
+  }
+  const edges = [];
+  for (const { r, z } of rims) {
+    let prev = null;
+    for (let i = 0; i <= fragments; i++) {
+      const t = 2 * Math.PI * i / fragments;
+      const p = new THREE.Vector3(centre.x + r * Math.cos(t), centre.y + r * Math.sin(t), min.z + z);
+      if (prev) edges.push([prev, p]);
+      prev = p;
+    }
+  }
+  return edges;
 }
 
 /// The runs of a profile: each a straight stretch (one side) or a sampled arc (one cylinder).
@@ -337,8 +434,13 @@ function profileRuns(points) {
 }
 
 /// The surfaces of one primitive — a box, or a profile extruded along z.
-function addSurfaces(source, box, plane, cylinder, prefix, sphere = null) {
+function addSurfaces(source, box, plane, cylinder, prefix, sphere = null, cone = null) {
   const { min, max } = box;
+
+  if (source.revolve) {
+    revolveSurfaces(source, box, plane, cylinder, cone, prefix);
+    return;
+  }
 
   // A sphere is one face and nothing else — no edge anywhere on it. What is drawn is its
   // silhouette, which depends on the camera and so is not a face's business (see
@@ -400,6 +502,59 @@ function addSurfaces(source, box, plane, cylinder, prefix, sphere = null) {
       }
     }
   }
+}
+
+/// What is drawn of a piece that depends on the camera: a sphere's silhouette, a cone's two
+/// grazing lines. Empty for anything else.
+export function pieceSilhouette(piece, camera) {
+  if (piece.sphere) return sphereSilhouette(piece, camera);
+  if (piece.revolve) return revolveSilhouette(piece, camera);
+  return [];
+}
+
+/// The grazing lines of the conical parts of a solid of revolution. A cone's surface normal is
+/// constant along a generatrix, so the generatrix is on the silhouette when that normal is
+/// perpendicular to the line of sight to the apex — exact under perspective too, since every
+/// point of the generatrix sees the eye in a direction the normal is perpendicular to at once.
+/// Cylindrical parts are left alone: they have their rims, and whether a cylinder should show
+/// its grazing lines is a question of drawing style still open.
+function revolveSilhouette(piece, camera) {
+  const out = [];
+  const { min, max } = piece.box;
+  const centre = new THREE.Vector2((min.x + max.x) / 2, (min.y + max.y) / 2);
+  const profile = revolveProfile(piece.source ?? piece);
+  const { runs, at } = profileRuns(profile.map((p) => [p.x, p.y]));
+  const rot = new THREE.Matrix3().setFromMatrix4(piece.world);
+  const axisW = new THREE.Vector3(0, 0, 1).applyMatrix3(rot).normalize();
+  const u = new THREE.Vector3(1, 0, 0).applyMatrix3(rot).normalize();
+  const v = new THREE.Vector3().crossVectors(axisW, u).normalize();
+  const eye = camera.isPerspectiveCamera ? camera.position : null;
+  const viewDir = camera.getWorldDirection(new THREE.Vector3());
+  for (const run of runs) {
+    if (run.curved) continue;
+    const a = at(run.start), b = at(run.end);
+    const dr = b.x - a.x, dz = b.y - a.y;
+    if (Math.abs(dz) < 1e-6 || Math.abs(dr) < 1e-6) continue;        // annulus, cylinder
+    if (a.x < 1e-6 && b.x < 1e-6) continue;
+    const zApex = a.y - a.x * dz / dr;
+    const apex = new THREE.Vector3(centre.x, centre.y, min.z + zApex).applyMatrix4(piece.world);
+    const widening = (a.x < b.x) === (a.y < b.y);
+    const axis = widening ? axisW.clone() : axisW.clone().negate();
+    const tan = Math.abs(dr / dz);
+    const d = eye ? apex.clone().sub(eye) : viewDir.clone();
+    // n(θ)·d = 0 with n = cosα(cosθ u + sinθ v) − sinα axis  ⇒  A cosθ + B sinθ = tanα (axis·d)
+    const A = u.dot(d), B = v.dot(d), C = tan * axis.dot(d);
+    const m = Math.hypot(A, B);
+    if (m < 1e-9 || Math.abs(C) > m) continue;
+    const base = Math.atan2(B, A), spread = Math.acos(C / m);
+    const s1 = Math.abs(a.y - zApex), s2 = Math.abs(b.y - zApex);
+    for (const theta of [base + spread, base - spread]) {
+      const radial = u.clone().multiplyScalar(Math.cos(theta)).addScaledVector(v, Math.sin(theta));
+      const pt = (s) => apex.clone().addScaledVector(axis, s).addScaledVector(radial, s * tan);
+      out.push(pt(s1), pt(s2));
+    }
+  }
+  return out;
 }
 
 /// The silhouette of a sphere piece as seen by `camera`, as segment endpoints in world space.
@@ -595,6 +750,16 @@ export function assignTriangles(mesh, faces, candidates = null) {
           // Signed: a neighbour flush against this face shares the plane with the opposite normal.
           if (normal.dot(face.normal) * sign < 0.995) { fits = false; break; }
           if (Math.abs(offset.copy(p).sub(face.point).dot(face.normal)) > 0.02) { fits = false; break; }
+        } else if (face.kind === 'cone') {
+          // On the cone: at the axial distance s from the apex the radius is s·tan; and facing
+          // the right way — outward radially for a piece's face, at the axis for a bore or cut.
+          offset.copy(p).sub(face.point);
+          const along = offset.dot(face.axis);
+          if (along < face.from - 0.05 || along > face.to + 0.05) { fits = false; break; }
+          const radial = offset.addScaledVector(face.axis, -along);
+          const r = radial.length();
+          if (Math.abs(r - along * face.tan) > Math.max(0.05, r * 0.005)) { fits = false; break; }
+          if (r > 1e-6 && normal.dot(radial.normalize()) * sign < 0.3) { fits = false; break; }
         } else if (face.kind === 'sphere') {
           // Every vertex at the radius, facing outward — OpenSCAD's sphere vertices lie exactly
           // on it, so the tolerance is for arithmetic only.
@@ -1053,6 +1218,8 @@ export function pieceOutline(component) {
   const cutters = (component.cutters ?? []).map((c) => {
     const cut = prepareBox(c);
     cut.profile = c.profile ?? null;
+    cut.revolve = c.revolve ?? null;
+    cut.fragments = c.fragments ?? 32;
     cut.approximate = c.approximate === true;
     // Piece space into this cutter's own space, so a profile can be honoured where it exists.
     cut.fromPiece = new THREE.Matrix4().multiplyMatrices(cut.inverse, box.matrix);
@@ -1080,6 +1247,10 @@ export function pieceOutline(component) {
   // The piece's own edges, with the cut-away spans removed. A board with a rounded corner
   // follows its extruded profile; anything else is a box.
   if (component.sphere) return [];       // no edge anywhere on a sphere; its silhouette is drawn per frame
+  if (component.revolve) {
+    emit(revolveRims(component, box, component.fragments ?? 32), cutters);
+    return points;
+  }
   emit(component.edges ? component.edges.map(([ax, ay, az, bx, by, bz]) =>
          [new THREE.Vector3(box.min.x + ax, box.min.y + ay, box.min.z + az),
           new THREE.Vector3(box.min.x + bx, box.min.y + by, box.min.z + bz)])
@@ -1107,6 +1278,18 @@ export function pieceOutline(component) {
     const others = cutters.filter((_, i) => i !== index);
     if (cutter.profile) {
       emit(withinPiece(holeEdges(cutter, box)), others);
+    } else if (cutter.revolve) {
+      // A conical cut (a countersink): its rims where the piece begins and ends along its axis,
+      // and at every corner of its profile in between — in the cutter's own space, then placed.
+      const zLow = Math.max(cutter.min.z, depthLimit(cutter, box, false));
+      const zHigh = Math.min(cutter.max.z, depthLimit(cutter, box, true));
+      if (zHigh > zLow) {
+        // Cloned: neighbouring rim segments share their common point, and transforming in place
+        // would move it twice.
+        const rims = revolveRims(cutter, cutter, cutter.fragments ?? 32, zLow, zHigh)
+          .map(([a, b]) => [a.clone().applyMatrix4(cutter.toPiece), b.clone().applyMatrix4(cutter.toPiece)]);
+        emit(withinPiece(rims), others);
+      }
     } else if (cutter.overlap && !cutter.approximate) {
       emit(overlapEdges(cutter.overlap, identity), others);
     }

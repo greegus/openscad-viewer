@@ -33,6 +33,15 @@ expect "wall ends without the panel" "$(echo "$out" | field "['wallEndTriangles'
 expect "lower board's covered top is still a face" "$(echo "$out" | field "['lowerTopPatch']")" "2000"
 expect "pieces in several meshes" "$(echo "$out" | field "['inSeveralMeshes']")" "0"
 
+echo "Tests/cone.scad"
+out=$(Tests/probe.sh Tests/cone.scad Tests/probes/cone.js) || { echo "  probe failed: $out"; exit 1; }
+expect "names in order"  "$(echo "$out" | field "['names']")"    '["Cone", "Frustum", "Tube", "Countersunk board"]'
+expect "every triangle claimed" "$(echo "$out" | field "['coverage']")" '["94/94", "188/188", "384/384", "300/300"]'
+expect "cone"    "$(echo "$out" | field "['cone']")"    '{"faces": ["plane:bottom", "cone:cone"], "rimSegments": 48, "silhouetteLines": 2}'
+expect "frustum" "$(echo "$out" | field "['frustum']")" '{"faces": ["plane:bottom", "cone:cone", "plane:top"], "rimSegments": 96, "silhouetteLines": 2}'
+expect "tube"    "$(echo "$out" | field "['tube']")"    '{"faces": ["plane:bottom", "cylinder:side", "plane:top", "cylinder:bore"], "rimSegments": 192, "silhouetteLines": 0}'
+expect "countersunk board" "$(echo "$out" | field "['board']['rimSegments']")" "108"
+
 if [ $# -ge 1 ]; then
   echo "$1"
   cat > build/design-probe.js <<'JS'

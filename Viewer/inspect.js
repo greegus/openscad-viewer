@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { toScreen, cursorPx, pointToSegment2D, pieceFeatures, featureUnderCursor, sphereSilhouette, contactPatches,
+import { toScreen, cursorPx, pointToSegment2D, pieceFeatures, featureUnderCursor, pieceSilhouette, contactPatches,
          axisName, pieceFaces, assignTriangles, trianglesTouchingBox, trianglesInBox, clipToBox,
          MODEL_TO_WORLD } from './picking.js';
 import { createStroke } from './strokes.js';
@@ -314,13 +314,13 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
   /// The outline a whole piece is drawn with. A sphere has no outline, only a silhouette, which
   /// follows the camera — `update` redraws it every frame it is highlighted.
   function pieceStrokePoints(piece) {
-    if (piece.sphere) return sphereSilhouette(piece, view.camera);
-    const points = [];
+    const points = pieceSilhouette(piece, view.camera);
     for (let i = 0; i < piece.outline.length; i += 3) {
       points.push(new THREE.Vector3(piece.outline[i], piece.outline[i + 1], piece.outline[i + 2]));
     }
     return points;
   }
+  const followsCamera = (piece) => piece.sphere || piece.revolve;
 
   function show(target, lines, face) {
     lines.visible = false;
@@ -430,7 +430,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     }
     if (target.type === 'body') return { name: 'Body', id: null };
     const kind = target.face?.kind;
-    const name = kind === 'cylinder' ? 'Round face' : kind === 'sphere' ? 'Spherical face' : 'Face';
+    const name = { cylinder: 'Round face', sphere: 'Spherical face', cone: 'Conical face' }[kind] ?? 'Face';
     return { name, id: target.face?.piece?.id ?? null };
   }
 
@@ -479,6 +479,15 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
         ['Size', `${mm(b.x)} × ${mm(b.y)} × ${mm(b.z)} mm`],
         ['Triangles', String(target.triangles.length)],
         ['Note', 'no CSG box — extruded shape'],
+      ];
+    }
+    if (target.face?.kind === 'cone') {
+      const f = target.face;
+      return [
+        ['Surface', 'conical'],
+        ['Radii', `${mm(f.from * f.tan)} – ${mm(f.to * f.tan)} mm`],
+        ['Half-angle', `${(Math.atan(f.tan) * 180 / Math.PI).toFixed(1)}°`],
+        ['Triangles', String(target.triangles.length)],
       ];
     }
     if (target.face?.kind === 'sphere') {
@@ -727,8 +736,8 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     const key = view.camera.matrixWorld.elements.join(',') + view.camera.zoom;
     if (key !== cameraKey) {
       cameraKey = key;
-      if (hovered?.type === 'part' && hovered.piece.sphere && hoverLines.visible) hoverLines.setPoints(pieceStrokePoints(hovered.piece));
-      if (selected?.type === 'part' && selected.piece.sphere && selectLines.visible) selectLines.setPoints(pieceStrokePoints(selected.piece));
+      if (hovered?.type === 'part' && followsCamera(hovered.piece) && hoverLines.visible) hoverLines.setPoints(pieceStrokePoints(hovered.piece));
+      if (selected?.type === 'part' && followsCamera(selected.piece) && selectLines.visible) selectLines.setPoints(pieceStrokePoints(selected.piece));
     }
     if (!state.enabled || label.hidden || !anchor) return;
     const p = toScreen(anchor, view.camera, canvas);
