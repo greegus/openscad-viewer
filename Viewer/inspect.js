@@ -956,6 +956,14 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     points: f.points.map((q) => [q.x, q.y, q.z].map((v) => Math.round(v))),
   }));
 
-  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, arcPoint, selection, highlightPiece, highlightPieces, selectPiece, features, longestFeature, edgesInPiece, pieceCoverage, ellipses, patches,
+  /// The CSG face under a pixel, for another tool (Measure) to use the same faces Inspect does.
+  function faceAt(px) {
+    const target = targetAt(px, false);
+    return target?.type === 'face' && target.face ? target : null;
+  }
+  /// The fill of a face target, clipped to its piece and with its contact patches.
+  const faceFill = (target) => faceGeometry(target.mesh, target.triangles, target.piece, target.face?.patches ?? []);
+
+  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, faceAt, faceFill, arcPoint, selection, highlightPiece, highlightPieces, selectPiece, features, longestFeature, edgesInPiece, pieceCoverage, ellipses, patches,
            clear, update, setFills };
 }

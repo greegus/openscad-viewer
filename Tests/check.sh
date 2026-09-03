@@ -41,6 +41,7 @@ expect "cone"    "$(echo "$out" | field "['cone']")"    '{"faces": ["plane:botto
 expect "frustum" "$(echo "$out" | field "['frustum']")" '{"faces": ["plane:bottom", "cone:cone", "plane:top"], "rimSegments": 96, "silhouetteLines": 2}'
 expect "tube"    "$(echo "$out" | field "['tube']")"    '{"faces": ["plane:bottom", "cylinder:side", "plane:top", "cylinder:bore"], "rimSegments": 192, "silhouetteLines": 0}'
 expect "countersunk board" "$(echo "$out" | field "['board']['rimSegments']")" "108"
+expect "measure board top to frustum top" "$(echo "$out" | field "['measured']")" "Parallel faces · distance 25.0 mm"
 
 if [ $# -ge 1 ]; then
   echo "$1"

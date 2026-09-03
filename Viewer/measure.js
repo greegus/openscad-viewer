@@ -14,7 +14,9 @@ export function createMeasure({ scene, view, renderer, readout }) {
     features: [],     // lines and arcs, in world coordinates
     meshes: [],       // occluders, so only visible geometry responds
     occlude: true,
-    picks: [],        // at most 2 features
+    picks: [],        // at most 2: { kind: 'edge', feature } or { kind: 'face', target }
+    faceAt: null,     // the CSG face under a pixel, lent by Inspect
+    faceFill: null,
   };
 
   // --- visuals ---
@@ -25,6 +27,18 @@ export function createMeasure({ scene, view, renderer, readout }) {
   const hoverLine = createStroke({ scene, color: 0xffd60a, width: 2, outline: 1, renderOrder: 20 });
   const pickLines = [0, 1].map(() =>
     createStroke({ scene, color: 0x22dd77, width: 2, outline: 1, renderOrder: 22 }));
+  // Faces are picked as well as edges, so they need a fill of their own — the same kind
+  // Inspect draws, in Measure's colours.
+  const makeFace = (color, opacity) => {
+    const m = new THREE.Mesh(new THREE.BufferGeometry(),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthTest: false, side: THREE.DoubleSide }));
+    m.renderOrder = 19;
+    m.visible = false;
+    scene.add(m);
+    return m;
+  };
+  const hoverFace = makeFace(0xffd60a, 0.28);
+  const pickFaces = [0, 1].map(() => makeFace(0x22dd77, 0.35));
 
   const dimLine = new THREE.Line(
     new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
@@ -55,13 +69,76 @@ export function createMeasure({ scene, view, renderer, readout }) {
   /// In x-ray the whole point is to reach what is behind, so occlusion is dropped there.
   function setOcclusion(on) { state.occlude = on; }
 
-  const pick = (px) => featureUnderCursor(px, state.features, view.camera, canvas, 14,
-                                          state.occlude ? state.meshes : null);
+  /// Inspect lends its face model, so a face measured is the face inspected — the same plane,
+  /// the same boundary, the same patches where a neighbour rests on it.
+  function setFacePicker(faceAt, faceFill) { state.faceAt = faceAt; state.faceFill = faceFill; }
+
+  /// An edge if one is near the cursor, else the face under it. Edges first: they are thin and
+  /// always lie on a face, so the face would otherwise swallow them.
+  const pick = (px) => {
+    // Six pixels, as Inspect: a wider reach for edges used to make sense when edges were all
+    // there was to pick; now it would take the face's rim wherever a face was meant.
+    const feature = featureUnderCursor(px, state.features, view.camera, canvas, 6,
+                                       state.occlude ? state.meshes : null);
+    if (feature) return { kind: 'edge', feature };
+    const target = state.faceAt?.(px);
+    return target ? { kind: 'face', target } : null;
+  };
 
   const drawFeature = (line, feature) => {
     const points = [];
     for (const s of feature.segments) points.push(s.a, s.b);
     line.setPoints(points);
+  };
+  const draw = (line, face, item) => {
+    line.visible = false;
+    face.visible = false;
+    if (!item) return;
+    if (item.kind === 'edge') { drawFeature(line, item.feature); return; }
+    face.geometry.dispose();
+    face.geometry = state.faceFill(item.target);
+    face.visible = true;
+  };
+
+  // --- face geometry, for distances ---
+
+  /// A face as the world-space triangles of its fill: what a distance to it is measured against.
+  const faceTriangles = (target) => {
+    const pos = state.faceFill(target).attributes.position;
+    const out = [];
+    for (let i = 0; i + 8 < pos.count * 3; i += 9) {
+      out.push([new THREE.Vector3(pos.array[i], pos.array[i + 1], pos.array[i + 2]),
+                new THREE.Vector3(pos.array[i + 3], pos.array[i + 4], pos.array[i + 5]),
+                new THREE.Vector3(pos.array[i + 6], pos.array[i + 7], pos.array[i + 8])]);
+    }
+    return out;
+  };
+  const closestOnTriangle = (p, [a, b, c]) => new THREE.Triangle(a, b, c).closestPointToPoint(p, new THREE.Vector3());
+
+  /// Shortest connector from a set of points to a set of triangles.
+  function pointsToTriangles(points, triangles) {
+    let best = null;
+    for (const p of points) {
+      for (const tri of triangles) {
+        const q = closestOnTriangle(p, tri);
+        const d = p.distanceTo(q);
+        if (!best || d < best.distance) best = { distance: d, from: p.clone(), to: q };
+      }
+    }
+    return best;
+  }
+
+  /// Points along a feature: its vertices plus a few per segment, enough for a distance.
+  const featurePoints = (f) => {
+    const out = [];
+    for (const seg of f.segments) for (const t of [0, 0.25, 0.5, 0.75]) out.push(seg.a.clone().lerp(seg.b, t));
+    out.push(f.segments[f.segments.length - 1].b.clone());
+    return out;
+  };
+  const trianglePoints = (tris) => {
+    const out = [];
+    for (const [a, b, c] of tris) out.push(a, b, c, a.clone().add(b).add(c).divideScalar(3));
+    return out;
   };
 
   /// Shortest connector between two features: the best of their segment pairs.
@@ -101,30 +178,94 @@ export function createMeasure({ scene, view, renderer, readout }) {
 
   const mm = (v) => `${v.toFixed(1)} mm`;
 
+  const faceName = (t) => ({ cylinder: 'Round face', sphere: 'Spherical face', cone: 'Conical face' }[t.face.kind] ?? 'Face');
+  const itemName = (item) => item.kind === 'edge'
+    ? (item.feature.type === 'arc' ? `Arc: R ${mm(item.feature.radius)}` : `Edge: ${mm(item.feature.length)}`)
+    : faceName(item.target);
+
+  /// The measurement between two picks, as { distance, from, to, note }.
+  ///
+  /// The furniture cases first: two parallel planes (shelf pitch, the clear width between two
+  /// sides) are the distance between the planes; two parallel cylinders (a row of holes) the
+  /// distance between their axes; an edge parallel to a plane its height above it. Anything else
+  /// is the shortest connector between the two, with the angle where both have a direction.
+  function measurement(x, y) {
+    const deg = (a, b) => THREE.MathUtils.radToDeg(Math.acos(Math.min(1, Math.abs(a.dot(b)))));
+    if (x.kind === 'edge' && y.kind === 'edge') {
+      const r = featureDistance(x.feature, y.feature);
+      const straight = x.feature.type === 'line' && y.feature.type === 'line';
+      const angle = straight ? deg(x.feature.b.clone().sub(x.feature.a).normalize(), y.feature.b.clone().sub(y.feature.a).normalize()) : null;
+      const parallel = straight && angle < 0.5;
+      return { ...r, note: parallel ? `Parallel edges · distance ${mm(r.distance)}`
+        : straight ? `Distance ${mm(r.distance)} · angle ${angle.toFixed(1)}°` : `Distance ${mm(r.distance)}` };
+    }
+    const fx = x.kind === 'face' ? x.target.face : null;
+    const fy = y.kind === 'face' ? y.target.face : null;
+    if (fx && fy) {
+      if (fx.kind === 'plane' && fy.kind === 'plane') {
+        const angle = deg(fx.normal, fy.normal);
+        if (angle < 0.5) {
+          // Distance between the planes, drawn from the picked point on one straight to the other.
+          const from = x.target.point.clone();
+          const d = fy.point.clone().sub(from).dot(fy.normal);
+          const to = from.clone().addScaledVector(fy.normal, d);
+          return { distance: Math.abs(d), from, to, note: `Parallel faces · distance ${mm(Math.abs(d))}` };
+        }
+        const r = pointsToTriangles(trianglePoints(faceTriangles(x.target)), faceTriangles(y.target));
+        return { ...r, note: `Faces at ${angle.toFixed(1)}° · closest ${mm(r.distance)}` };
+      }
+      if (fx.kind === 'cylinder' && fy.kind === 'cylinder' && deg(fx.axis, fy.axis) < 0.5) {
+        // Parallel axes: the pitch of two holes, from axis to axis.
+        const from = x.target.point.clone().sub(fx.point);
+        from.addScaledVector(fx.axis, -from.dot(fx.axis)).add(fx.point);       // on x's axis, at the picked height
+        const off = from.clone().sub(fy.point);
+        const to = from.clone().sub(off.addScaledVector(fy.axis, -off.dot(fy.axis)));
+        const d = from.distanceTo(to);
+        return { distance: d, from, to, note: `Parallel axes · distance ${mm(d)} · radii ${mm(fx.radius)} / ${mm(fy.radius)}` };
+      }
+      if (fx.kind === 'cylinder' && fy.kind === 'plane' && Math.abs(fx.axis.dot(fy.normal)) < 0.01) {
+        const from = x.target.point.clone().sub(fx.point);
+        from.addScaledVector(fx.axis, -from.dot(fx.axis)).add(fx.point);
+        const d = fy.point.clone().sub(from).dot(fy.normal);
+        const to = from.clone().addScaledVector(fy.normal, d);
+        return { distance: Math.abs(d), from, to, note: `Axis to face · distance ${mm(Math.abs(d))} · radius ${mm(fx.radius)}` };
+      }
+      if (fy.kind === 'cylinder' && fx.kind === 'plane') return measurement(y, x);
+    }
+    const one = fx ? y : x, face = fx ? x : y;      // exactly one of them is a face
+    if (face.kind === 'face' && one.kind === 'edge' && face.target.face.kind === 'plane' && one.feature.type === 'line') {
+      const dir = one.feature.b.clone().sub(one.feature.a).normalize();
+      const n = face.target.face.normal;
+      if (Math.abs(dir.dot(n)) < 0.01) {
+        const from = one.feature.a.clone().lerp(one.feature.b, 0.5);
+        const d = face.target.face.point.clone().sub(from).dot(n);
+        const to = from.clone().addScaledVector(n, d);
+        return { distance: Math.abs(d), from, to, note: `Edge parallel to face · distance ${mm(Math.abs(d))}` };
+      }
+    }
+    // The general case: the closest pair of points.
+    const pointsOf = (item) => item.kind === 'edge' ? featurePoints(item.feature) : trianglePoints(faceTriangles(item.target));
+    const trisOf = (item) => item.kind === 'face' ? faceTriangles(item.target) : null;
+    let r = null;
+    if (trisOf(y)) r = pointsToTriangles(pointsOf(x), trisOf(y));
+    else if (trisOf(x)) { const q = pointsToTriangles(pointsOf(y), trisOf(x)); r = q && { distance: q.distance, from: q.to, to: q.from }; }
+    return { ...r, note: `Closest · distance ${mm(r.distance)}` };
+  }
+
   function describe() {
     if (state.picks.length === 0) {
-      readout('Click an edge. A second click measures the distance.');
+      readout('Click an edge or a face. A second click measures the distance.');
       dimLine.visible = false; label.hidden = true;
       return;
     }
     if (state.picks.length === 1) {
-      const f = state.picks[0];
-      readout(f.type === 'arc'
-        ? `Arc: R ${mm(f.radius)} — pick a second edge`
-        : `Edge: ${mm(f.length)} — pick a second edge`);
+      readout(`${itemName(state.picks[0])} — pick a second edge or face`);
       dimLine.visible = false; label.hidden = true;
       return;
     }
 
     const [x, y] = state.picks;
-    const r = featureDistance(x, y);
-
-    // Parallel edges are the common case in furniture (shelf pitch) — worth saying so.
-    // An arc has no single direction, so the comparison only applies to straight edges.
-    const straight = x.type === 'line' && y.type === 'line';
-    const angle = straight ? THREE.MathUtils.radToDeg(Math.acos(Math.min(1, Math.abs(
-      x.b.clone().sub(x.a).normalize().dot(y.b.clone().sub(y.a).normalize()))))) : null;
-    const parallel = straight && angle < 0.5;
+    const r = measurement(x, y);
 
     dimLine.geometry.setFromPoints([r.from, r.to]);
     dimLine.computeLineDistances();
@@ -136,17 +277,17 @@ export function createMeasure({ scene, view, renderer, readout }) {
     label.style.top = `${mid.y}px`;
     label.hidden = false;
 
-    readout(parallel ? `Parallel edges · distance ${mm(r.distance)}`
-      : straight ? `Distance ${mm(r.distance)} · angle ${angle.toFixed(1)}°`
-      : `Distance ${mm(r.distance)}`);
+    readout(r.note);
   }
 
   function clear() {
     state.picks = [];
     for (const l of pickLines) l.visible = false;
+    for (const f of pickFaces) f.visible = false;
     dimLine.visible = false;
     label.hidden = true;
     hoverLine.visible = false;
+    hoverFace.visible = false;
     if (state.enabled) describe();
   }
 
@@ -156,32 +297,32 @@ export function createMeasure({ scene, view, renderer, readout }) {
 
   canvas.addEventListener('pointermove', (event) => {
     if (!state.enabled) return;
-    const feature = pick(cursorPx(event, canvas));
-    if (feature) {
-      drawFeature(hoverLine, feature);
-      canvas.style.cursor = 'crosshair';
-    } else {
-      hoverLine.visible = false;
-      canvas.style.cursor = '';
-    }
+    const item = pick(cursorPx(event, canvas));
+    draw(hoverLine, hoverFace, item);
+    canvas.style.cursor = item ? 'crosshair' : '';
     // Describe what is under the cursor, as Inspect does — but never overwrite a pick in
     // progress, where the readout is telling you what it is still waiting for.
     if (state.picks.length === 0) {
-      readout(feature
-        ? (feature.type === 'arc'
-            ? `Arc · R ${mm(feature.radius)} · ${(feature.sweep * 180 / Math.PI).toFixed(1)}°`
-            : `Edge · ${mm(feature.length)}`)
-        : 'Click an edge. A second click measures the distance.');
+      readout(item
+        ? (item.kind === 'edge' && item.feature.type === 'arc'
+            ? `Arc · R ${mm(item.feature.radius)} · ${(item.feature.sweep * 180 / Math.PI).toFixed(1)}°`
+            : item.kind === 'edge' ? `Edge · ${mm(item.feature.length)}`
+            : faceName(item.target))
+        : 'Click an edge or a face. A second click measures the distance.');
     }
   });
 
   makeClickDetector(canvas, (px) => {
     if (!state.enabled) return;
-    const feature = pick(px);
-    if (!feature) { clear(); return; }
-    if (state.picks.length >= 2) { state.picks = []; for (const l of pickLines) l.visible = false; }
-    state.picks.push(feature);
-    drawFeature(pickLines[state.picks.length - 1], feature);
+    const item = pick(px);
+    if (!item) { clear(); return; }
+    if (state.picks.length >= 2) {
+      state.picks = [];
+      for (const l of pickLines) l.visible = false;
+      for (const f of pickFaces) f.visible = false;
+    }
+    state.picks.push(item);
+    draw(pickLines[state.picks.length - 1], pickFaces[state.picks.length - 1], item);
     describe();
   });
 
@@ -203,6 +344,9 @@ export function createMeasure({ scene, view, renderer, readout }) {
     group.visible = on;
     if (!on) {
       hoverLine.visible = false;
+      hoverFace.visible = false;
+      for (const f of pickFaces) f.visible = false;
+      for (const l of pickLines) l.visible = false;
       dimLine.visible = false;
       label.hidden = true;
       canvas.style.cursor = '';
@@ -213,7 +357,7 @@ export function createMeasure({ scene, view, renderer, readout }) {
   }
 
   return {
-    setTargets, setOccluders, setEnabled, setOcclusion, clear, update,
+    setTargets, setOccluders, setEnabled, setOcclusion, setFacePicker, clear, update,
     // Diagnostic hooks: they let the maths be verified without simulating clicks.
     edges: () => state.features.flatMap((f) => f.segments).map((e, i) => ({
       i,

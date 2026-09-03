@@ -852,6 +852,8 @@ async function load() {
       scene, view, renderer,
       readout: (text, heading) => showReadout(text, heading),
     });
+    // Measure picks faces through Inspect's face model, so both tools mean the same face.
+    measure.setFacePicker(inspect.faceAt, inspect.faceFill);
     // Only once both tools exist: retarget() feeds them both, and a tool created afterwards
     // would silently never receive its geometry.
     retarget();

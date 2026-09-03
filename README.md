@@ -399,14 +399,20 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
   highlight, and a hover description in the readout. The one difference is deliberate: while
   a pick is in progress the readout keeps saying what it is waiting for, instead of being
   overwritten by whatever the cursor is passing over.
-  Snapping is in screen pixels (14 px threshold —
-  in 3D a nearby edge would win over the one under the cursor), click picks an edge, a
-  second click measures. The distance is the shortest connector between two **segments**
-  (not lines), so it also works for edges that pass each other; parallel edges are reported
-  as a pitch, otherwise the angle is added. A click is told from a drag by movement < 4 px
-  and < 400 ms, so OrbitControls keep working. Esc clears. Both tools share the picking
-  helpers in `Web/picking.js`. Verified against the model:
-  shelf tops at 1150 → 1455 mm measured exactly 305 mm.
+  Snapping is in screen pixels (6 px, as Inspect — in 3D a nearby edge would win over the one
+  under the cursor; it was 14 px while edges were all there was, which then took a face's rim
+  wherever the face was meant). A click picks an edge, or — with no edge near — the **face**
+  under the cursor, the same CSG face Inspect shows, lent by Inspect so both tools mean the same
+  thing. A second click measures. Two straight edges: the shortest connector between the
+  **segments** (not lines), so edges that pass each other work too; parallel ones are a pitch,
+  otherwise the angle is added. Two parallel planes: the distance between the planes, drawn from
+  the picked point straight across — the shelf pitch and the clear width between two sides. Two
+  parallel cylinders: axis to axis, the pitch of two holes; a cylinder and a plane along its
+  axis: axis to plane. An edge parallel to a plane: its height above it. Anything else: the
+  closest pair of points, with the angle where both have a direction. A click is told from a
+  drag by movement < 4 px and < 400 ms, so OrbitControls keep working. Esc clears. Both tools
+  share the picking helpers in `Web/picking.js`. Verified against the model: shelf tops at
+  1150 → 1455 mm measured exactly 305 mm, by edge and by face alike.
 
 ## Other decisions
 
@@ -671,8 +677,6 @@ OpenSCAD is looked up in this order: `OPENSCAD_PATH` → setting →
   `SMAppService.agent` registered from the container app.
 - Dependencies are only resolved from relative `include`/`use` next to the file;
   `OPENSCADPATH` libraries do not enter the cache key.
-- Measuring covers edges. Face-to-face distance (pitch of two parallel *faces*) is not
-  implemented yet.
 - Pieces the CSG reader knows exactly are cubes, cylinders, extrusions of the 2D shapes listed
   under *What counts as a face*, and polyhedra — a `polyhedron` states its faces outright, so it
   gets them as planes and its edges as the seams between non-coplanar faces (`Tests/polyhedron.scad`:
