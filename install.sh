@@ -7,6 +7,13 @@ APP=/Applications/OpenSCADViewer.app
 LABEL=com.greegus.OpenSCADViewer.Renderer
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
+# Nothing goes into /Applications unchecked: the viewer is measured on the test designs first
+# (Tests/check.sh — faces claimed, edges, names, a pixel comparison of hover and selection).
+# SKIP_CHECKS=1 skips them, for when a check itself is what is being worked on.
+if [ "${SKIP_CHECKS:-0}" != 1 ]; then
+  Tests/check.sh || { echo "not installed: checks failed"; exit 1; }
+fi
+
 rm -rf "$APP"
 cp -R build/OpenSCADViewer.app /Applications/
 

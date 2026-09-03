@@ -490,7 +490,7 @@ design in the real `ViewerViewController` headlessly (`Tests/probe.sh <file.scad
 compiles a small host around it and evaluates a JavaScript probe once the model is in) and
 asserts on what comes back — every triangle of the drilled cube claimed by a face, four full
 circles and two whole ellipses, the wedge's five faces and nine edges, the names in order. Run
-it with a design of your own as the argument for coverage, names and arc radii on that too.
+it with a design of your own as the argument for coverage, names and arc radii on that too. `install.sh` runs it before anything goes into /Applications (`SKIP_CHECKS=1` to skip).
 
 One check is on pixels, and it is there because of the one bug the buffers could not see: the
 hover stroke, first used on an edge as the pointer crosses the model, drew at most that one
