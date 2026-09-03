@@ -572,23 +572,13 @@ export function facesOf(piece) {
 /// arc the face actually covers, and clipped to the piece.
 function cylinderSilhouette(face, piece, camera) {
   const axis = face.axis;
-  const u = new THREE.Vector3(1, 0, 0);
-  if (Math.abs(u.dot(axis)) > 0.9) u.set(0, 1, 0);
-  u.cross(axis).normalize();
-  const v = new THREE.Vector3().crossVectors(axis, u).normalize();
-  let A, B, C;
-  if (camera.isPerspectiveCamera) {
-    const d = face.point.clone().sub(camera.position);
-    A = u.dot(d); B = v.dot(d); C = -face.radius;
-  } else {
-    const d = camera.getWorldDirection(new THREE.Vector3());
-    A = u.dot(d); B = v.dot(d); C = 0;
-  }
-  const m = Math.hypot(A, B);
-  if (m < 1e-9 || Math.abs(C) > m) return [];
-  const base = Math.atan2(B, A), spread = Math.acos(C / m);
+  const [u, v] = basisAround(axis);
+  const eye = camera.isPerspectiveCamera ? camera.position : null;
+  const d = eye ? face.point.clone().sub(eye) : camera.getWorldDirection(new THREE.Vector3());
+  const angles = grazingAngles(u.dot(d), v.dot(d), eye ? -face.radius : 0);
+  if (!angles) return [];
   const out = [];
-  for (const theta of [base + spread, base - spread]) {
+  for (const theta of angles) {
     const radial = u.clone().multiplyScalar(Math.cos(theta)).addScaledVector(v, Math.sin(theta));
     if (face.arc && !withinArc(face, radial)) continue;
     const a = face.point.clone().addScaledVector(radial, face.radius);
@@ -616,10 +606,7 @@ function withinPhi(phi, angle) {
 /// part of the tube the face covers. Orthographic: a = radial·d, b = axis·d, and 0 in place of ρ.
 function torusSilhouette(face, piece, camera) {
   const axis = face.axis;
-  const u = new THREE.Vector3(1, 0, 0);
-  if (Math.abs(u.dot(axis)) > 0.9) u.set(0, 1, 0);
-  u.cross(axis).normalize();
-  const v = new THREE.Vector3().crossVectors(axis, u).normalize();
+  const [u, v] = basisAround(axis);
   const eye = camera.isPerspectiveCamera ? camera.position : null;
   const d = eye ? face.point.clone().sub(eye) : camera.getWorldDirection(new THREE.Vector3());
   const steps = Math.max(48, piece.fragments ?? 48);
@@ -628,11 +615,9 @@ function torusSilhouette(face, piece, camera) {
   for (let i = 0; i <= steps; i++) {
     const theta = 2 * Math.PI * i / steps;
     const radial = u.clone().multiplyScalar(Math.cos(theta)).addScaledVector(v, Math.sin(theta));
-    const A = radial.dot(d) + (eye ? face.major : 0), B = axis.dot(d), C = eye ? -face.rho : 0;
-    const m = Math.hypot(A, B);
-    if (m < 1e-9 || Math.abs(C) > m) { branches[0].push(null); branches[1].push(null); continue; }
-    const base = Math.atan2(B, A), spread = Math.acos(C / m);
-    [base + spread, base - spread].forEach((phi, k) => {
+    const angles = grazingAngles(radial.dot(d) + (eye ? face.major : 0), axis.dot(d), eye ? -face.rho : 0);
+    if (!angles) { branches[0].push(null); branches[1].push(null); continue; }
+    angles.forEach((phi, k) => {
       if (face.phi && !withinPhi(face.phi, phi)) { branches[k].push(null); return; }
       branches[k].push(face.point.clone().addScaledVector(radial, face.major + face.rho * Math.cos(phi))
                                           .addScaledVector(axis, face.rho * Math.sin(phi)));
@@ -657,6 +642,23 @@ function withinArc(face, radial) {
   return wrap(angle(da, radial)) <= wrap(angle(da, db)) + 1e-3;
 }
 
+/// Two unit vectors perpendicular to `axis` and to each other.
+function basisAround(axis) {
+  const u = new THREE.Vector3(1, 0, 0);
+  if (Math.abs(u.dot(axis)) > 0.9) u.set(0, 1, 0);
+  u.cross(axis).normalize();
+  return [u, new THREE.Vector3().crossVectors(axis, u).normalize()];
+}
+
+/// The two angles solving A·cosθ + B·sinθ = C, or null when there are none — every grazing
+/// condition on a surface of revolution comes to this form.
+function grazingAngles(A, B, C) {
+  const m = Math.hypot(A, B);
+  if (m < 1e-9 || Math.abs(C) > m) return null;
+  const base = Math.atan2(B, A), spread = Math.acos(C / m);
+  return [base + spread, base - spread];
+}
+
 /// The grazing lines of the conical parts of a solid of revolution. A cone's surface normal is
 /// constant along a generatrix, so the generatrix is on the silhouette when that normal is
 /// perpendicular to the line of sight to the apex — exact under perspective too, since every
@@ -671,8 +673,7 @@ function revolveSilhouette(piece, camera) {
   const { runs, at } = profileRuns(profile.map((p) => [p.x, p.y]));
   const rot = new THREE.Matrix3().setFromMatrix4(piece.world);
   const axisW = new THREE.Vector3(0, 0, 1).applyMatrix3(rot).normalize();
-  const u = new THREE.Vector3(1, 0, 0).applyMatrix3(rot).normalize();
-  const v = new THREE.Vector3().crossVectors(axisW, u).normalize();
+  const [u, v] = basisAround(axisW);
   const eye = camera.isPerspectiveCamera ? camera.position : null;
   const viewDir = camera.getWorldDirection(new THREE.Vector3());
   for (const run of runs) {
@@ -688,12 +689,10 @@ function revolveSilhouette(piece, camera) {
     const tan = Math.abs(dr / dz);
     const d = eye ? apex.clone().sub(eye) : viewDir.clone();
     // n(θ)·d = 0 with n = cosα(cosθ u + sinθ v) − sinα axis  ⇒  A cosθ + B sinθ = tanα (axis·d)
-    const A = u.dot(d), B = v.dot(d), C = tan * axis.dot(d);
-    const m = Math.hypot(A, B);
-    if (m < 1e-9 || Math.abs(C) > m) continue;
-    const base = Math.atan2(B, A), spread = Math.acos(C / m);
+    const angles = grazingAngles(u.dot(d), v.dot(d), tan * axis.dot(d));
+    if (!angles) continue;
     const s1 = Math.abs(a.y - zApex), s2 = Math.abs(b.y - zApex);
-    for (const theta of [base + spread, base - spread]) {
+    for (const theta of angles) {
       const radial = u.clone().multiplyScalar(Math.cos(theta)).addScaledVector(v, Math.sin(theta));
       const pt = (s) => apex.clone().addScaledVector(axis, s).addScaledVector(radial, s * tan);
       out.push(pt(s1), pt(s2));
@@ -726,10 +725,7 @@ export function sphereSilhouette(piece, camera, segments = 96) {
     ringCentre = centre;
     ringRadius = r;
   }
-  const u = new THREE.Vector3(1, 0, 0);
-  if (Math.abs(u.dot(normal)) > 0.9) u.set(0, 1, 0);
-  u.cross(normal).normalize();
-  const v = normal.clone().cross(u).normalize();
+  const [u, v] = basisAround(normal);
   const out = [];
   let prev = null;
   for (let i = 0; i <= segments; i++) {

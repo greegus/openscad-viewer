@@ -768,19 +768,6 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
   /// In x-ray the whole point is to reach what is behind, so occlusion is dropped there.
   function setOcclusion(on) { state.occlude = on; }
 
-  /// Diagnostic: every arc the feature builder recovered.
-  /// Diagnostic: where the modifier path gives up.
-  const probeModifier = (px) => {
-    const point = new THREE.Vector2(px[0], px[1]);
-    const h = hit(point);
-    if (!h) return 'no ray hit';
-    const info = state.groups.get(h.object);
-    if (!info) return 'no face groups for mesh';
-    const piece = pieceAt(h.point);
-    if (piece) return 'part';
-    const tris = info.bodies.get(info.findBody(h.faceIndex));
-    return tris ? 'body' : 'no body group';
-  };
 
   /// What is selected, in the terms hiding needs: which mesh, which triangles, and which CSG
   /// components go with it. Null for an edge or a single face — taking those out would leave a
@@ -851,25 +838,6 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
              px: [Math.round(px.x), Math.round(px.y)] };
   };
 
-  /// How many mesh creases fall inside a piece's box. Tells apart "the picker cannot find this
-  /// piece's edges" from "this piece has no creases, because it is welded flush to its
-  /// neighbours and no crease exists there to find".
-  const edgesInPiece = (id) => {
-    const piece = state.pieces.find((p) => p.id === id);
-    if (!piece) return null;
-    const v = new THREE.Vector3();
-    const slack = 1;
-    let segments = 0;
-    for (const f of state.features) {
-      for (const seg of f.segments) {
-        v.copy(seg.a).add(seg.b).multiplyScalar(0.5).applyMatrix4(piece.inverse);
-        if (v.x >= piece.box.min.x - slack && v.x <= piece.box.max.x + slack
-         && v.y >= piece.box.min.y - slack && v.y <= piece.box.max.y + slack
-         && v.z >= piece.box.min.z - slack && v.z <= piece.box.max.z + slack) segments++;
-      }
-    }
-    return segments;
-  };
 
   const triangleArea = (mesh, tri) => {
     const pos = mesh.geometry.attributes.position;
@@ -925,15 +893,6 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     drawnSelect: selectLines.visible ? selectLines.segmentCount : 0,
   });
 
-  /// Screen position of a point along the first arc, for driving tests. `t` in [0,1].
-  const arcPoint = (t = 0.5) => {
-    const arc = state.features.find((f) => f.type === 'arc');
-    if (!arc) return null;
-    const i = Math.min(arc.segments.length - 1, Math.floor(t * arc.segments.length));
-    const seg = arc.segments[i];
-    const p = toScreen(seg.a.clone().add(seg.b).multiplyScalar(0.5), view.camera, canvas);
-    return [p.x, p.y, arc.segments.length];
-  };
 
   /// Diagnostic: contact patches per face of a piece — where neighbours rest on it.
   const patches = (id) => {
@@ -979,6 +938,6 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
   /// The fill of a face target, clipped to its piece and with its contact patches.
   const faceFill = (target) => faceGeometry(target.mesh, target.triangles, target.piece, target.face?.patches ?? []);
 
-  return { setTargets, setEnabled, setOcclusion, arcs, debug, probeModifier, faceAt, faceFill, arcPoint, selection, highlightPiece, highlightPieces, selectPiece, features, longestFeature, edgesInPiece, pieceCoverage, ellipses, patches,
+  return { setTargets, setEnabled, setOcclusion, arcs, debug, faceAt, faceFill, selection, highlightPiece, highlightPieces, selectPiece, features, longestFeature, pieceCoverage, ellipses, patches,
            clear, update, setFills };
 }
