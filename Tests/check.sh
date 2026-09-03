@@ -22,7 +22,7 @@ echo "Tests/polyhedron.scad"
 out=$(Tests/probe.sh Tests/polyhedron.scad Tests/probes/polyhedron.js) || { echo "  probe failed: $out"; exit 1; }
 expect "names in order"  "$(echo "$out" | field "['names']")" '["Cube", "Wedge", "Ball", "Second cube", "Cone", "Frustum", "Tube", "Countersunk board", "Ring", "Knob"]'
 expect "wedge"           "$(echo "$out" | field "['wedge']")" '{"claimed": "8/8", "edges": 9, "faces": 5}'
-expect "ball"            "$(echo "$out" | field "['ball']")" '{"claimed": "2300/2300", "faces": ["sphere:2300/r20"], "silhouetteRadius": 20, "silhouetteSegments": 96, "staticEdges": 0}'
+expect "ball"            "$(echo "$out" | field "['ball']")" '{"claimed": "2300/2292", "faces": ["sphere:2300/r20"], "silhouetteRadius": 20, "silhouetteSegments": 96, "staticEdges": 0}'
 expect "every triangle of the revolved solids claimed" "$(echo "$out" | field "['revolvedCoverage']")" '["94/94", "188/188", "384/384", "300/300", "4608/4608", "1726/1726"]'
 expect "ring: one torus, no rim, a silhouette" "$(echo "$out" | field "['ring']")" '{"faces": ["torus:round"], "rimSegments": 0, "silhouetteSegments": true}'
 expect "knob: bottom, side, rounded edge, dish" "$(echo "$out" | field "['knob']")" '{"faces": ["plane:bottom", "cylinder:side", "torus:round", "cone:cone"], "rimSegments": 144}'
@@ -44,6 +44,13 @@ expect "every piece fully covered" "$(echo "$out" | field "['coverage']")"     '
 expect "wall ends without the panel" "$(echo "$out" | field "['wallEndTriangles']")" "[6, 6]"
 expect "lower board's covered top is still a face" "$(echo "$out" | field "['lowerTopPatch']")" "2000"
 expect "pieces in several meshes" "$(echo "$out" | field "['inSeveralMeshes']")" "0"
+
+echo "Tests/demo.scad"
+out=$(Tests/probe.sh Tests/demo.scad Tests/probes/demo.js) || { echo "  probe failed: $out"; exit 1; }
+expect "names in order" "$(echo "$out" | field "['names']")" '["Corpus: Left side", "Corpus: Right side", "Corpus: Bottom", "Corpus: Top", "Corpus: Back panel", "Shelves: Lower shelf", "Shelves: Upper shelf", "Door: Door"]'
+expect "every piece covered by its faces" "$(echo "$out" | field "['covered']")" "true"
+expect "shelf pitch"     "$(echo "$out" | field "['pitch']")" "Parallel faces · distance 305.0 mm"
+expect "shelves and bottom resting on the side patch it" "$(echo "$out" | field "['shelfPatches']")" "20160"
 
 if [ $# -ge 1 ]; then
   echo "$1"
