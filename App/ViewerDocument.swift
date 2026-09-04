@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 /// `@objc` with an explicit name on purpose: AppKit looks this class up from Info.plist by
 /// string, and a Swift class is otherwise registered under its mangled name.
 @objc(ViewerDocument)
-final class ViewerDocument: NSDocument, NSWindowDelegate, NSToolbarDelegate {
+final class ViewerDocument: NSDocument, NSWindowDelegate {
 
     private(set) var fileWatcher: FileWatcher?
     private weak var viewer: ViewerViewController?
@@ -51,11 +51,6 @@ final class ViewerDocument: NSDocument, NSWindowDelegate, NSToolbarDelegate {
         window.setFrameAutosaveName("ScadViewerWindow")
         window.collectionBehavior.insert(.fullScreenPrimary)   // green button / ⌃⌘F
 
-        let toolbar = NSToolbar(identifier: "ViewerToolbar")
-        toolbar.delegate = self
-        toolbar.displayMode = .iconAndLabel
-        window.toolbar = toolbar
-
         let controller = NSWindowController(window: window)
         addWindowController(controller)
 
@@ -72,33 +67,6 @@ final class ViewerDocument: NSDocument, NSWindowDelegate, NSToolbarDelegate {
         fileWatcher = FileWatcher(url: url) { [weak self] in
             self?.viewer?.reload()
         }
-    }
-
-    // MARK: - Toolbar
-
-    private static let exportItem = NSToolbarItem.Identifier("exportSTL")
-
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, Self.exportItem]
-    }
-
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.exportItem, .flexibleSpace, .space]
-    }
-
-    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier,
-                 willBeInsertedIntoToolbar: Bool) -> NSToolbarItem? {
-        guard id == Self.exportItem else { return nil }
-        let item = NSToolbarItem(itemIdentifier: id)
-        item.label = "Export STL"
-        item.toolTip = "Export the design as an STL mesh"
-        item.image = NSImage(systemSymbolName: "square.and.arrow.up",
-                             accessibilityDescription: "Export STL")
-        // Left to the responder chain rather than targeted at the document, so the menu item
-        // and the button reach the same place through the same route.
-        item.action = #selector(exportSTL(_:))
-        item.isBordered = true
-        return item
     }
 
     // MARK: - Export

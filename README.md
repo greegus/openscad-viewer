@@ -651,9 +651,9 @@ re-arms the file watch after a replacement.
 restored, camera reframed. Deliberately more than the automatic refresh that follows a change
 on disk, which only replaces the geometry.
 
-**Export STL** sits in the window's toolbar and in File → Export STL… (Cmd-E). Both are
-untargeted actions, so the responder chain takes them to the document you are looking at
-rather than to whichever was opened last. A single mesh, not the per-material split the
+**Export STL** is File → Export STL… (Cmd-E) — an untargeted action, so the responder chain
+takes it to the document you are looking at rather than to whichever was opened last. (It had a
+toolbar button too; the toolbar held nothing else and is gone.) A single mesh, not the per-material split the
 viewer uses — STL has no notion of colour. It is a full CGAL render, so seconds the first
 time and instant from the cache afterwards.
 
