@@ -528,7 +528,18 @@ function addSurfaces(source, box, plane, cylinder, prefix, sphere = null, cone =
   // A polyhedron states its own faces; they are the piece's faces, not the box's.
   if (source.faces) {
     for (const [px, py, pz, nx, ny, nz] of source.faces) {
-      plane(new THREE.Vector3(min.x + px, min.y + py, min.z + pz), new THREE.Vector3(nx, ny, nz), prefix + 'face');
+      // A face on the box's boundary with an axis normal is a box face in all but origin — a
+      // board from a STEP file is a polyhedron — and is tagged like one, so a neighbour resting
+      // on it patches it (`contactPatches`) exactly as it would a cube's.
+      const point = new THREE.Vector3(min.x + px, min.y + py, min.z + pz);
+      const normal = new THREE.Vector3(nx, ny, nz);
+      let tag = null;
+      for (const axis of ['x', 'y', 'z']) {
+        if (Math.abs(Math.abs(normal[axis]) - 1) > 1e-6) continue;
+        const at = normal[axis] > 0 ? max[axis] : min[axis];
+        if (Math.abs(point[axis] - at) < 0.05) tag = { axis, at };
+      }
+      plane(point, normal, prefix + 'face', tag);
     }
     return;
   }

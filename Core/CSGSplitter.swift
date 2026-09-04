@@ -1040,6 +1040,32 @@ extension CSGSplitter {
             normals = normals.map { n in n.map { [-$0[0], -$0[1], -$0[2]] } }
         }
 
+        // One face per plane, not per polygon: a triangulated STEP board arrives as hundreds of
+        // triangles, and every one on the same plane is the same face. Coplanar faces are merged
+        // into one (its point the mean of theirs); the edge test below already ignores seams
+        // between coplanar faces, so this only removes the duplicates.
+        var merged: [[Double]] = []
+        var planeIndex: [Int: Int] = [:]                 // face index → merged face index
+        var keyed: [String: Int] = [:]
+        var counts: [Int] = []
+        for (f, plane) in planes.enumerated() {
+            let n = Array(plane[3...])
+            let d = plane[0] * n[0] + plane[1] * n[1] + plane[2] * n[2]
+            let key = "\(Int((n[0] * 1000).rounded())),\(Int((n[1] * 1000).rounded())),\(Int((n[2] * 1000).rounded())),\(Int((d * 100).rounded()))"
+            if let m = keyed[key] {
+                for k in 0..<3 { merged[m][k] += plane[k] }
+                counts[m] += 1
+                planeIndex[f] = m
+            } else {
+                keyed[key] = merged.count
+                planeIndex[f] = merged.count
+                merged.append(plane)
+                counts.append(1)
+            }
+        }
+        for m in merged.indices { for k in 0..<3 { merged[m][k] /= Double(counts[m]) } }
+        planes = merged
+
         // Edges: each undirected vertex pair with the faces it belongs to.
         var owners: [String: [Int]] = [:]
         for (f, face) in faces.enumerated() where normals[f] != nil {

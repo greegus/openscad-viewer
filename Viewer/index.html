@@ -152,7 +152,7 @@ import { STLLoader } from './vendor/STLLoader.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { createMeasure } from './measure.js';
 import { createInspect } from './inspect.js';
-import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, sphereSilhouette, pieceSilhouette, clippedArea, makeClickDetector, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
+import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, sphereSilhouette, pieceSilhouette, clippedArea, clipToBox, contactPatches, makeClickDetector, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
 import { updateStrokeResolution } from './strokes.js';
 import { createGrid } from './grid.js';
 import { createPalette } from './palette.js';
@@ -1049,6 +1049,69 @@ window.debug = {
   components: () => components,
   features: () => inspect?.features() ?? [],
   pieceCoverage: () => inspect?.pieceCoverage() ?? null,
+  /// Diagnostic: the area each plane face of a piece actually has in the mesh (its claimed
+  /// triangles), plus its patches — against the face's nominal size.
+  faceAreas: (id) => {
+    const piece = pieceModel.find((p) => p.id === id);
+    if (!piece) return null;
+    const faces = pieceFaces(piece);
+    const out = new Map();
+    const v = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+    for (const part of parts) {
+      const groups = assignTriangles(part.mesh, faces, trianglesTouchingBox(part.mesh, piece.source ?? piece));
+      const pos = part.mesh.geometry.attributes.position;
+      for (const [f, tris] of groups) {
+        if (f.kind !== 'plane' || !tris.length) continue;
+        const key = f.normal.toArray().map((c) => Math.round(c)).join(',') + '@' + (f.tag ? f.tag.at.toFixed(1) : '?');
+        let area = 0;
+        for (const t of tris) {
+          for (let k = 0; k < 3; k++) v[k].fromBufferAttribute(pos, t * 3 + k).applyMatrix4(part.mesh.matrixWorld);
+          area += v[1].clone().sub(v[0]).cross(v[2].clone().sub(v[0])).length() / 2;
+        }
+        // Clipped to the piece, as the panel measures it, plus the contact patches.
+        const soup = clipToBox(part.mesh, tris, piece.source ?? piece, 0.01);
+        let clipped = 0;
+        for (let i = 0; i + 8 < soup.length; i += 9) {
+          const a = new THREE.Vector3(soup[i], soup[i+1], soup[i+2]), b = new THREE.Vector3(soup[i+3], soup[i+4], soup[i+5]), c = new THREE.Vector3(soup[i+6], soup[i+7], soup[i+8]);
+          clipped += b.sub(a).cross(c.sub(a)).length() / 2;
+        }
+        let patched = 0;
+        for (const tri of contactPatches(piece, f, pieceModel)) patched += tri[1].clone().sub(tri[0]).cross(tri[2].clone().sub(tri[0])).length() / 2;
+        const prev = out.get(key) ?? { raw: 0, clipped: 0, patched: 0 };
+        out.set(key, { raw: prev.raw + area, clipped: prev.clipped + clipped, patched: prev.patched + patched });
+      }
+    }
+    return [...out.entries()].map(([k, a]) => `${k} raw ${Math.round(a.raw)} clipped ${Math.round(a.clipped)} patches ${Math.round(a.patched)}`).sort();
+  },
+  /// Diagnostic: the tagged (box) faces of a piece, and for each the neighbours whose box comes
+  /// within a millimetre of its plane — what `contactPatches` has to work with.
+  contactsOf: (id) => {
+    const piece = pieceModel.find((p) => p.id === id);
+    if (!piece) return null;
+    const out = [];
+    for (const face of pieceFaces(piece)) {
+      if (face.kind !== 'plane' || !face.tag) continue;
+      const axis = face.tag.axis, at = face.tag.at;
+      const atMax = Math.abs(at - piece.box.max[axis]) < 1e-6;
+      const near = [];
+      const corner = new THREE.Vector3();
+      for (const other of pieceModel) {
+        if (other === piece) continue;
+        const toLocal = new THREE.Matrix4().multiplyMatrices(piece.inverse, other.world);
+        const box = new THREE.Box3();
+        for (const cx of [other.box.min.x, other.box.max.x]) for (const cy of [other.box.min.y, other.box.max.y]) for (const cz of [other.box.min.z, other.box.max.z]) box.expandByPoint(corner.set(cx, cy, cz).applyMatrix4(toLocal));
+        const side = atMax ? box.min[axis] : box.max[axis];
+        if (Math.abs(side - at) < 1) {
+          const [u, v] = ['x', 'y', 'z'].filter((k) => k !== axis);
+          const u0 = Math.max(box.min[u], piece.box.min[u]), u1 = Math.min(box.max[u], piece.box.max[u]);
+          const v0 = Math.max(box.min[v], piece.box.min[v]), v1 = Math.min(box.max[v], piece.box.max[v]);
+          near.push(`#${other.id} gap=${(side - at).toFixed(3)} overlap=${(u1 - u0).toFixed(1)}x${(v1 - v0).toFixed(1)} sphere=${!!other.sphere}`);
+        }
+      }
+      out.push({ axis, at: +at.toFixed(2), atMax, inward: face.inward, label: face.label, near });
+    }
+    return out;
+  },
   /// Why a triangle (by its world vertices) is refused by each plane face of a piece.
   whyUnclaimed: (id, verts) => {
     const piece = pieceModel.find((p) => p.id === id);
