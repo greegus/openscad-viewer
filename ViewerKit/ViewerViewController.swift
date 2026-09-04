@@ -83,12 +83,6 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
         ("Top", "top"), ("Bottom", "bottom"),
     ]
 
-    /// Inspection tools. Mutually exclusive, and both can be off.
-    private static let tools: [(title: String, id: String)] = [
-        ("Inspect", "inspect"),
-        ("Measure", "measure"),
-        ("Section", "section"),
-    ]
 
     /// 3D display modes. Adding another (wireframe, section) is one line here and in index.html.
     private static let modes: [(title: String, id: String)] = [
@@ -98,7 +92,6 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
 
     private let webView = ScadWebView(frame: .zero)
     private var modePicker: NSSegmentedControl!
-    private var toolPicker: NSSegmentedControl!
     private var controlRow: NSStackView!
     private var projectionPicker: NSSegmentedControl!
     private var viewPicker: NSSegmentedControl!
@@ -141,14 +134,6 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
         edgesToggle.translatesAutoresizingMaskIntoConstraints = false
 
 
-        // A toggle-button group rather than a picker: either tool can be switched off again,
-        // so `.selectAny` plus mutual exclusion in the action, not `.selectOne`.
-        toolPicker = NSSegmentedControl(labels: Self.tools.map(\.title), trackingMode: .selectAny,
-                                        target: self, action: #selector(changeTool))
-        toolPicker.translatesAutoresizingMaskIntoConstraints = false
-        // The page starts in Inspect, so the button has to start pressed or the two disagree.
-        toolPicker.setSelected(true, forSegment: 0)
-
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
@@ -161,13 +146,13 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
 
         // One stack for the whole control row: it stays centred while it fits and clamps to
         // the left edge when it does not, rather than being cut off on both sides.
-        controlRow = NSStackView(views: [modePicker, projectionPicker, viewPicker,
-                                         edgesToggle, toolPicker])
+        // The tools (Inspect, Measure, Section) live in the page, as a floating panel at the
+        // bottom of the view, so their state and their look stay with the tools themselves.
+        controlRow = NSStackView(views: [modePicker, projectionPicker, viewPicker, edgesToggle])
         controlRow.orientation = .horizontal
         controlRow.alignment = .centerY
         controlRow.spacing = 10
         controlRow.setCustomSpacing(14, after: viewPicker)
-        controlRow.setCustomSpacing(14, after: edgesToggle)
         controlRow.translatesAutoresizingMaskIntoConstraints = false
 
         // The viewer tells us when the camera has been rotated off a preset direction.
@@ -251,16 +236,6 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
         let index = viewPicker.selectedSegment
         guard Self.views.indices.contains(index) else { return }
         webView.setView(Self.views[index].id)
-    }
-
-    @objc private func changeTool() {
-        // Turning one on turns the other off; turning the active one off leaves no tool.
-        let selected = toolPicker.selectedSegment
-        for index in Self.tools.indices where index != selected {
-            toolPicker.setSelected(false, forSegment: index)
-        }
-        let active = toolPicker.isSelected(forSegment: selected) ? Self.tools[selected].id : "none"
-        webView.setTool(active)
     }
 
     @objc private func changeDisplayMode() {

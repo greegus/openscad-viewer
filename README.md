@@ -272,8 +272,10 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
 - **Edges** are an independent toggle, not tied to the mode, and black in both modes
   (technical-drawing look) — x-ray keeps the normal background, so there is no reason to
   lighten them.
-- **Tools** are a two-button group, `Inspect` and `Measure` — mutually exclusive, and both
-  can be off (hence `.selectAny` with mutual exclusion in the action, not `.selectOne`).
+- **Tools** — `Inspect`, `Measure`, `Section` — are a floating glass panel at the bottom centre of
+  the view, in the page rather than in the native control row, so their state and their look stay
+  with the tools themselves. Mutually exclusive, and clicking the active one switches it off. The
+  inspection readout sits in the bottom right corner, opposite the parts list.
 - **Test fixture**: `Tests/groove.scad` — a board with a groove milled by `difference()`. It
   pins down three behaviours at once: the subtrahend is not outlined as a piece (1 piece, not
   2), the surviving outline is clipped where the groove opens (14 segments, not 12), and the

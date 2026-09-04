@@ -123,8 +123,9 @@
   .tree-row:hover .tree-eye, .tree-eye.is-off { opacity: 1; }
   .tree-eye.is-off { color: rgba(255, 255, 255, 0.4); }
   #readout {
-    /* Right, opposite the parts list, so the two never overlap. */
-    position: absolute; right: 10px; top: 10px; max-width: 260px;
+    /* Bottom right: out of the way of the parts list (top left) and of the model, which sits
+       in the middle; it reads like a status field. */
+    position: absolute; right: 10px; bottom: 10px; max-width: 260px;
     padding: 6px 11px; border-radius: 8px;
     font: 12px -apple-system, system-ui, sans-serif;
     color: rgba(255, 255, 255, 0.92);
@@ -136,10 +137,33 @@
   }
   /* Nothing to say, nothing to draw — otherwise an empty pill floats there. */
   #readout:empty { display: none; }
+  /* The tools, floating at the bottom centre: glass like the other panels. */
+  #tools {
+    position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+    display: flex; gap: 2px; padding: 4px;
+    border-radius: 11px; background: rgba(18, 20, 24, 0.62);
+    backdrop-filter: blur(16px) saturate(1.4);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.12), 0 6px 20px rgba(0, 0, 0, 0.35);
+    font: 12px -apple-system, system-ui, sans-serif;
+  }
+  .tool-btn {
+    appearance: none; border: 0; cursor: default;
+    padding: 5px 13px; border-radius: 8px;
+    color: rgba(255, 255, 255, 0.85); background: transparent;
+    font: inherit; font-weight: 500;
+  }
+  .tool-btn:hover { background: rgba(255, 255, 255, 0.08); }
+  .tool-btn.is-on { background: #0a84ff; color: white; }
 </style>
 <canvas id="canvas"></canvas>
 <div id="status">Rendering mesh…</div>
 <div id="readout"></div>
+<div id="tools">
+  <button class="tool-btn" data-tool="inspect">Inspect</button>
+  <button class="tool-btn" data-tool="measure">Measure</button>
+  <button class="tool-btn" data-tool="section">Section</button>
+</div>
 <div id="parts-tree"></div>
 
 <script type="importmap">
@@ -574,7 +598,13 @@ function setTool(name) {
   if (name === 'inspect') inspect?.setEnabled(true);
   if (name === 'measure') measure?.setEnabled(true);
   if (name === 'section') section?.start();
+  for (const b of document.querySelectorAll('#tools .tool-btn')) b.classList.toggle('is-on', b.dataset.tool === name);
   window.webkit?.messageHandlers?.viewer?.postMessage('tool: ' + name);
+}
+// The tool buttons: either can be switched off again by clicking it, so a click on the active
+// one leaves no tool.
+for (const b of document.querySelectorAll('#tools .tool-btn')) {
+  b.addEventListener('click', () => setTool(tool === b.dataset.tool ? 'none' : b.dataset.tool));
 }
 
 // --- camera ---
