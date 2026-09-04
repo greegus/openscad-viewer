@@ -152,7 +152,7 @@ import { STLLoader } from './vendor/STLLoader.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { createMeasure } from './measure.js';
 import { createInspect } from './inspect.js';
-import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, sphereSilhouette, pieceSilhouette, clippedArea, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
+import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, sphereSilhouette, pieceSilhouette, clippedArea, makeClickDetector, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
 import { updateStrokeResolution } from './strokes.js';
 import { createGrid } from './grid.js';
 import { createPalette } from './palette.js';
@@ -363,6 +363,14 @@ function recentrePivot() {
   // letting the pivot jump, so the feel does not change when the model leaves the middle.
   controls.target.copy(hit ? hit.point
     : pivotRay.ray.origin.clone().addScaledVector(pivotRay.ray.direction, distance));
+}
+
+/// The first visible part under a pixel, for the tools that cut or aim at a face.
+function raycastParts(px) {
+  const rect = canvas.getBoundingClientRect();
+  const ndc = new THREE.Vector2((px.x / rect.width) * 2 - 1, -(px.y / rect.height) * 2 + 1);
+  pivotRay.setFromCamera(ndc, view.camera);
+  return pivotRay.intersectObjects(parts.filter((p) => p.mesh.visible).map((p) => p.mesh), false)[0] ?? null;
 }
 
 makeControls();
@@ -677,7 +685,7 @@ function buildEdgeOverlay(pieces) {
   edgeLines = new THREE.LineSegments(geometry, edgeMaterial());
   edgeLines.visible = edgesOn;
   scene.add(edgeLines);
-  section?.setOverlay(edgeLines);
+  section?.setOverlays([edgeLines, silhouetteLines]);
   silhouetteCameraKey = '';
 }
 
@@ -700,6 +708,7 @@ function updateSilhouettes() {
   if (!silhouetteLines) {
     silhouetteLines = new THREE.LineSegments(new THREE.BufferGeometry(), edgeMaterial());
     scene.add(silhouetteLines);
+    section?.setOverlays([edgeLines, silhouetteLines]);   // so the cut takes the silhouettes too
   }
   silhouetteLines.geometry.dispose();
   silhouetteLines.geometry = new THREE.BufferGeometry();
@@ -957,6 +966,16 @@ window.addEventListener('keydown', (event) => {
 });
 
 window.section = section;   // for the palette and for tests
+
+/// Section mouse: a click on a face cuts there. (Orbiting is a drag, and a click is told from
+/// it the same way the other tools do.)
+makeClickDetector(renderer.domElement, (px) => {
+  if (tool !== 'section') return;
+  const hit = raycastParts(px);
+  if (!hit) return;
+  const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+  section.setFromHit(normal, hit.point, view.camera.getWorldDirection(new THREE.Vector3()));
+});
 const palette = createPalette({ actions: paletteActions });
 
 window.setHostActions = (ids) => { hostActions = ids ?? []; };

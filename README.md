@@ -557,12 +557,17 @@ without their tree paths and once without their hull outlines. Both times the co
 the data was stale, which is a genuinely confusing thing to debug. The cost is one slower render
 after an upgrade.
 
-**Cross section** (Cmd-K, or `Cut along X/Y/Z`) cuts the model with a plane and lets you look
-inside. Three states in the order you work in: pick the plane, pick which half goes, then slide
-it — the last stays live, so sliding is the tool rather than a step towards it. The plane is
-always perpendicular to a model axis, which is every cut worth making in furniture, and it
-starts in the middle of the model because a plane at the edge cuts nothing and looks broken.
-Arrow keys move it 1 mm, Shift 10 mm, Tab flips the kept side, Escape stops.
+**Cross section** (the Section tool, or Cmd-K `Cut along X/Y/Z`) cuts the model with a plane
+and lets you look inside. With the tool on, **click a face** and the cut goes through that
+point, perpendicular to the model axis nearest the face's normal — every cut worth making in
+furniture is axis-aligned — with the half toward you removed, since looking inside is the point;
+half a millimetre into the material, or the face's own skin and the cap would fight for the
+pixels. Clicking another face cuts there instead. Arrow keys move the plane 1 mm, Shift 10 mm,
+Tab flips the kept side, Escape stops. `Cut along X/Y/Z` from the palette starts in the middle
+of the model, because a plane at the edge cuts nothing and looks broken. The cut takes the edge
+overlay and the silhouettes with it, so no line hangs in the cut. (The readout had promised
+"click a face" and "drag" from the start; neither had been wired up — the tool only ever had
+its keys.)
 
 The cut face is drawn rather than left open: clipping removes triangles and leaves a shell, so
 panels would look like paper. Filling it uses the stencil buffer — back faces increment, front

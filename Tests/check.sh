@@ -51,6 +51,7 @@ out=$(Tests/probe.sh Tests/demo.scad Tests/probes/demo.js) || { echo "  probe fa
 expect "names in order" "$(echo "$out" | field "['names']")" '["Corpus: Left side", "Corpus: Right side", "Corpus: Bottom", "Corpus: Top", "Corpus: Back panel", "Shelves: Lower shelf", "Shelves: Upper shelf", "Door: Door"]'
 expect "every piece covered by its faces" "$(echo "$out" | field "['covered']")" "true"
 expect "shelf pitch"     "$(echo "$out" | field "['pitch']")" "Parallel faces · distance 305.0 mm"
+expect "section by clicking a face" "$(echo "$out" | field "['section']")" "ready z=300 keeping - caps=true"
 expect "shelves and bottom resting on the side patch it" "$(echo "$out" | field "['shelfPatches']")" "20160"
 
 if [ $# -ge 1 ]; then

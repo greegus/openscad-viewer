@@ -34,7 +34,7 @@ export function createSection({ scene, renderer, view, readout }) {
   scene.add(capGroup);
 
   let targets = [];        // { mesh, xray, colour }
-  let overlay = null;      // the single edge overlay
+  let overlays = [];       // the edge overlay and the silhouettes, one object each
 
   /// Stencil pair per material: back faces add, front faces subtract. What remains set is
   /// solid where the plane cuts, and the cap quad is painted through that mask.
@@ -110,9 +110,11 @@ export function createSection({ scene, renderer, view, readout }) {
         material.needsUpdate = true;
       }
     }
-    // The edge overlay is one object for the whole model, not one per material, so it takes the
-    // plane here rather than in the loop above. Missing it would leave edges hanging in the cut.
-    if (overlay) {
+    // The edge overlay and the silhouettes are one object each for the whole model, not one per
+    // material, so they take the plane here rather than in the loop above. Missing one would
+    // leave lines hanging in the cut.
+    for (const overlay of overlays) {
+      if (!overlay) continue;
       overlay.material.clippingPlanes = active ? [plane] : [];
       overlay.material.needsUpdate = true;
     }
@@ -126,7 +128,7 @@ export function createSection({ scene, renderer, view, readout }) {
     const axis = AXES[state.axis].label;
     const side = state.flipped ? '−' : '+';
     readout(`Section · ${axis} = ${Math.round(state.offset)} mm · keeping ${side}`
-          + ' · drag or ↑↓ to move, ⇥ to flip');
+          + ' · ↑↓ to move (⇧ ×10), ⇥ to flip, click a face to cut there');
   }
 
   return {
@@ -141,9 +143,10 @@ export function createSection({ scene, renderer, view, readout }) {
       updatePlane();
     },
 
-    /// The edge overlay, rebuilt whenever pieces are hidden, so it is handed over each time.
-    setOverlay(lines) {
-      overlay = lines;
+    /// The line overlays — edges, silhouettes — rebuilt whenever pieces are hidden or the
+    /// camera moves, so they are handed over each time.
+    setOverlays(list) {
+      overlays = list;
       updatePlane();
     },
 
@@ -174,13 +177,25 @@ export function createSection({ scene, renderer, view, readout }) {
       updatePlane();
     },
 
-    /// Puts the plane on the face under the cursor, snapped to the nearest model axis — the
-    /// quickest way in, and every cut worth making in furniture is axis-aligned anyway.
-    setFromNormal(worldNormal) {
+    /// Cuts at the face clicked: the plane through the hit point, along the model axis nearest
+    /// the face's normal — every cut worth making in furniture is axis-aligned — with the half
+    /// toward the camera removed, since the point of a section is to look inside.
+    setFromHit(worldNormal, worldPoint, worldViewDir) {
       const n = worldToModelVector(worldNormal);
       const axis = ['x', 'y', 'z'].reduce((best, k) =>
         Math.abs(n[k]) > Math.abs(n[best]) ? k : best, 'x');
-      this.setAxis(axis);
+      const p = worldToModelVector(worldPoint);
+      const look = worldToModelVector(worldViewDir);
+      state.axis = axis;
+      state.offset = p[axis];
+      // The kept side is the plane's normal side; pointing it along the view keeps what is
+      // behind the plane and removes what is in front.
+      state.flipped = look[axis] < 0;
+      // Half a millimetre into the material: on the face itself the face's own skin and the
+      // cap coincide and fight for the pixels.
+      state.offset += state.flipped ? -0.5 : 0.5;
+      state.stage = 'ready';
+      updatePlane();
     },
 
     start() { state.stage = 'plane'; report(); },
