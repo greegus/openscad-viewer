@@ -39,4 +39,6 @@ $fn = 48;
     translate([160, 280, 0]) rotate_extrude() translate([30, 0]) circle(10);
     // @name Knob
     translate([240, 200, 0]) rotate_extrude() hull() { square([30, 20]); translate([20, 20]) circle(10); }
+    // @name Quarter ring
+    translate([240, 280, 0]) rotate_extrude(angle = 90) translate([20, 0]) square([10, 30]);
 // @endgroup

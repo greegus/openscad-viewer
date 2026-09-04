@@ -20,12 +20,13 @@ expect "grazing lines in the two holes" "$(echo "$out" | field "['silhouetteLine
 
 echo "Tests/polyhedron.scad"
 out=$(Tests/probe.sh Tests/polyhedron.scad Tests/probes/polyhedron.js) || { echo "  probe failed: $out"; exit 1; }
-expect "names in order"  "$(echo "$out" | field "['names']")" '["Cube", "Wedge", "Ball", "Second cube", "Cone", "Frustum", "Tube", "Countersunk board", "Ring", "Knob"]'
+expect "names in order"  "$(echo "$out" | field "['names']")" '["Cube", "Wedge", "Ball", "Second cube", "Cone", "Frustum", "Tube", "Countersunk board", "Ring", "Knob", "Quarter ring"]'
 expect "wedge"           "$(echo "$out" | field "['wedge']")" '{"claimed": "8/8", "edges": 9, "faces": 5}'
 expect "ball"            "$(echo "$out" | field "['ball']")" '{"claimed": "2300/2292", "faces": ["sphere:2300/r20"], "silhouetteRadius": 20, "silhouetteSegments": 96, "staticEdges": 0}'
-expect "every triangle of the revolved solids claimed" "$(echo "$out" | field "['revolvedCoverage']")" '["94/94", "188/188", "384/384", "300/300", "4608/4608", "1726/1726"]'
+expect "every triangle of the revolved solids claimed" "$(echo "$out" | field "['revolvedCoverage']")" '["94/94", "188/188", "384/384", "300/300", "4608/4608", "1726/1726", "100/100"]'
 expect "ring: one torus, no rim, a silhouette" "$(echo "$out" | field "['ring']")" '{"faces": ["torus:round"], "rimSegments": 0, "silhouetteSegments": true}'
 expect "knob: bottom, side, rounded edge, dish" "$(echo "$out" | field "['knob']")" '{"faces": ["plane:bottom", "cylinder:side", "torus:round", "cone:cone"], "rimSegments": 144}'
+expect "quarter ring: two flat ends, arcs and profile edges" "$(echo "$out" | field "['quarter']")" '{"faces": ["plane:end", "plane:end", "plane:bottom", "cylinder:side", "plane:top", "cylinder:bore"], "rimSegments": 56, "silhouetteSegments": 2}'
 expect "cone"    "$(echo "$out" | field "['cone']")"    '{"faces": ["plane:bottom", "cone:cone"], "rimSegments": 48, "silhouetteLines": 2}'
 expect "frustum" "$(echo "$out" | field "['frustum']")" '{"faces": ["plane:bottom", "cone:cone", "plane:top"], "rimSegments": 96, "silhouetteLines": 2}'
 expect "tube"    "$(echo "$out" | field "['tube']")"    '{"faces": ["plane:bottom", "cylinder:side", "plane:top", "cylinder:bore"], "rimSegments": 192, "silhouetteLines": 4}'

@@ -156,7 +156,7 @@ export function buildPieceModel(components) {
     const origin = [c.matrix[3], c.matrix[7], c.matrix[11]];
     return {
       id: c.id, name: c.name, groups: c.groups ?? [], source: c, sphere: c.sphere ?? null,
-      revolve: c.revolve ?? null, fragments: c.fragments ?? 32,
+      revolve: c.revolve ?? null, fragments: c.fragments ?? 32, sweep: c.sweep ?? null, axisAt: c.axisAt ?? null,
       size: c.size, world, inverse: world.clone().invert(), outline,
       corner: c.centered ? origin.map((v, i) => v - c.size[i] / 2) : origin,
       box: new THREE.Box3(min, min.clone().add(new THREE.Vector3(sx, sy, sz))),
@@ -212,18 +212,20 @@ export function pieceFaces(piece) {
   /// A torus about `axis` through `centre`: a tube of radius `rho` around a circle of radius
   /// `major`. `phi` is the part of the tube's profile the face covers, as angles in the
   /// (radial, axial) half-plane — start, middle, end — since a rounded edge is a quarter of it.
-  const torus = (centre, axis, major, rho, phi, label, inward = false) => faces.push({
+  const torus = (centre, axis, major, rho, phi, label, inward = false, arc = null) => faces.push({
     kind: 'torus', label, major, rho, phi, inward,
     point: centre.clone().applyMatrix4(toWorld),
     axis: axis.clone().transformDirection(toWorld).normalize(),
+    arc: arc ? arc.map((q) => q.clone().applyMatrix4(toWorld)) : null,
     piece,
   });
   /// A cone about `axis` from `apex`, widening at `tan` per unit along it, over the axial range
   /// [from, to] from the apex.
-  const cone = (apex, axis, tan, from, to, label, inward = false) => faces.push({
+  const cone = (apex, axis, tan, from, to, label, inward = false, arc = null) => faces.push({
     kind: 'cone', label, tan, from, to, inward,
     point: apex.clone().applyMatrix4(toWorld),
     axis: axis.clone().transformDirection(toWorld).normalize(),
+    arc: arc ? arc.map((q) => q.clone().applyMatrix4(toWorld)) : null,
     piece,
   });
 
@@ -280,10 +282,25 @@ export function pieceFaces(piece) {
     addSurfaces(cut, box, (p0, n, label) => plane(place(p0), dir(n), label, null, true),
                 (p0, axis, radius, label, inwardOfCutter = false, extent = null, arc = null) => cylinder(place(p0), dir(axis), radius, label, !inwardOfCutter, extent, arc ? arc.map(place) : null),
                 'cut ', null,
-                (apex, axis, tan, from, to, label, inwardOfCutter = false) => cone(place(apex), dir(axis), tan, from, to, label, !inwardOfCutter),
-                (centre, axis, major, rho, phi, label, inwardOfCutter = false) => torus(place(centre), dir(axis), major, rho, phi, label, !inwardOfCutter));
+                (apex, axis, tan, from, to, label, inwardOfCutter = false, arc = null) => cone(place(apex), dir(axis), tan, from, to, label, !inwardOfCutter, arc ? arc.map(place) : null),
+                (centre, axis, major, rho, phi, label, inwardOfCutter = false, arc = null) => torus(place(centre), dir(axis), major, rho, phi, label, !inwardOfCutter, arc ? arc.map(place) : null));
   }
   return faces;
+}
+
+/// Where a solid of revolution's axis sits in its box, and how far round it is swept (radians).
+function revolveAxis(source, box) {
+  const at = source.axisAt
+    ? new THREE.Vector2(box.min.x + source.axisAt[0], box.min.y + source.axisAt[1])
+    : new THREE.Vector2((box.min.x + box.max.x) / 2, (box.min.y + box.max.y) / 2);
+  const sweep = source.sweep ? source.sweep * Math.PI / 180 : 2 * Math.PI;
+  return { at, sweep, partial: source.sweep != null };
+}
+
+/// Three points round the axis at radius r and height z — the start, middle and end of the
+/// sweep — for a face to know which part of the turn it covers.
+function sweepArc(centre, r, z, sweep) {
+  return [0, sweep / 2, sweep].map((t) => new THREE.Vector3(centre.x + r * Math.cos(t), centre.y + r * Math.sin(t), z));
 }
 
 /// The revolve profile of a piece as (r, z) points wound counter-clockwise, so that the outward
@@ -301,7 +318,14 @@ function revolveProfile(source) {
 /// A curved run would be a torus, which has no face here yet.
 function revolveSurfaces(source, box, plane, cylinder, cone, torus, prefix) {
   const { min, max } = box;
-  const centre = new THREE.Vector2((min.x + max.x) / 2, (min.y + max.y) / 2);
+  const { at: centre, sweep, partial } = revolveAxis(source, box);
+  // Less than a full turn leaves two flat ends, the profile's own shape, in the planes through
+  // the axis at the start and the end of the sweep.
+  if (partial) {
+    plane(new THREE.Vector3(centre.x, centre.y, min.z), new THREE.Vector3(0, -1, 0), prefix + 'end');
+    plane(new THREE.Vector3(centre.x, centre.y, min.z), new THREE.Vector3(-Math.sin(sweep), Math.cos(sweep), 0), prefix + 'end');
+  }
+  const arcOf = (r, z) => (partial ? sweepArc(centre, r, z, sweep) : null);
   const profile = revolveProfile(source);
   const { runs, at, fitOf } = profileRuns(profile.map((p) => [p.x, p.y]));
   const up = new THREE.Vector3(0, 0, 1);
@@ -322,7 +346,7 @@ function revolveSurfaces(source, box, plane, cylinder, cone, torus, prefix) {
       const bulges = whole || outward.dot(m.clone().sub(fit.centre)) > 0;   // normal away from the arc's centre; a full tube always bulges
       torus(new THREE.Vector3(centre.x, centre.y, min.z + fit.centre.y), up, fit.centre.x, fit.radius,
             whole ? null : { start: ang(a), mid: ang(m), end: ang(b) },
-            prefix + (bulges ? 'round' : 'fillet'), !bulges);
+            prefix + (bulges ? 'round' : 'fillet'), !bulges, arcOf(fit.centre.x + fit.radius, fit.centre.y));
       continue;
     }
     const a = at(run.start), b = at(run.end);
@@ -333,7 +357,7 @@ function revolveSurfaces(source, box, plane, cylinder, cone, torus, prefix) {
       // Annulus at height z.
       plane(new THREE.Vector3(centre.x, centre.y, min.z + a.y), new THREE.Vector3(0, 0, Math.sign(outwardZ)), prefix + (outwardZ > 0 ? 'top' : 'bottom'));
     } else if (Math.abs(dr) < 1e-6) {
-      cylinder(new THREE.Vector3(centre.x, centre.y, min.z + Math.min(a.y, b.y)), up, a.x, prefix + (outwardR > 0 ? 'side' : 'bore'), outwardR < 0, Math.abs(dz));
+      cylinder(new THREE.Vector3(centre.x, centre.y, min.z + Math.min(a.y, b.y)), up, a.x, prefix + (outwardR > 0 ? 'side' : 'bore'), outwardR < 0, Math.abs(dz), arcOf(a.x, Math.min(a.y, b.y)));
     } else if (cone) {
       // The apex is where the radius would reach zero; the axis is taken from the apex toward
       // the wider end, so the radius grows along it.
@@ -342,7 +366,7 @@ function revolveSurfaces(source, box, plane, cylinder, cone, torus, prefix) {
       const axis = new THREE.Vector3(0, 0, widening ? 1 : -1);
       const s1 = Math.abs(a.y - zApex), s2 = Math.abs(b.y - zApex);
       cone(new THREE.Vector3(centre.x, centre.y, min.z + zApex), axis, Math.abs(dr / dz),
-           Math.min(s1, s2), Math.max(s1, s2), prefix + 'cone', outwardR < 0);
+           Math.min(s1, s2), Math.max(s1, s2), prefix + 'cone', outwardR < 0, arcOf(Math.max(a.x, b.x), a.x > b.x ? a.y : b.y));
     }
   }
 }
@@ -352,7 +376,7 @@ function revolveSurfaces(source, box, plane, cylinder, cone, torus, prefix) {
 /// cylinder — in the box's coordinates.
 function revolveRims(source, box, fragments, zLow = -Infinity, zHigh = Infinity) {
   const { min, max } = box;
-  const centre = new THREE.Vector2((min.x + max.x) / 2, (min.y + max.y) / 2);
+  const { at: centre, sweep, partial } = revolveAxis(source, box);
   const profile = revolveProfile(source);
   const { runs, at } = profileRuns(profile.map((p) => [p.x, p.y]));
   const rims = [];
@@ -378,13 +402,28 @@ function revolveRims(source, box, fragments, zLow = -Infinity, zHigh = Infinity)
     }
   }
   const edges = [];
+  const steps = partial ? Math.max(1, Math.round(fragments * sweep / (2 * Math.PI))) : fragments;
   for (const { r, z } of rims) {
     let prev = null;
-    for (let i = 0; i <= fragments; i++) {
-      const t = 2 * Math.PI * i / fragments;
+    for (let i = 0; i <= steps; i++) {
+      const t = sweep * i / steps;
       const p = new THREE.Vector3(centre.x + r * Math.cos(t), centre.y + r * Math.sin(t), min.z + z);
       if (prev) edges.push([prev, p]);
       prev = p;
+    }
+  }
+  // The flat ends of a partial sweep are bounded by the profile itself, at the start and the
+  // end of the turn — every straight edge of it, and the arcs' chords are left to the rims.
+  if (partial) {
+    for (const t of [0, sweep]) {
+      const place = (q) => new THREE.Vector3(centre.x + q.x * Math.cos(t), centre.y + q.x * Math.sin(t), min.z + q.y);
+      for (const run of runs) {
+        if (run.curved) {
+          for (let i = run.start; i < run.end; i++) edges.push([place(at(i)), place(at(i + 1))]);
+        } else {
+          edges.push([place(at(run.start)), place(at(run.end))]);
+        }
+      }
     }
   }
   return edges;
@@ -616,7 +655,7 @@ function torusSilhouette(face, piece, camera) {
     const theta = 2 * Math.PI * i / steps;
     const radial = u.clone().multiplyScalar(Math.cos(theta)).addScaledVector(v, Math.sin(theta));
     const angles = grazingAngles(radial.dot(d) + (eye ? face.major : 0), axis.dot(d), eye ? -face.rho : 0);
-    if (!angles) { branches[0].push(null); branches[1].push(null); continue; }
+    if (!angles || (face.arc && !withinArc(face, radial))) { branches[0].push(null); branches[1].push(null); continue; }
     angles.forEach((phi, k) => {
       if (face.phi && !withinPhi(face.phi, phi)) { branches[k].push(null); return; }
       branches[k].push(face.point.clone().addScaledVector(radial, face.major + face.rho * Math.cos(phi))
@@ -668,7 +707,7 @@ function grazingAngles(A, B, C) {
 function revolveSilhouette(piece, camera) {
   const out = [];
   const { min, max } = piece.box;
-  const centre = new THREE.Vector2((min.x + max.x) / 2, (min.y + max.y) / 2);
+  const { at: centre, sweep, partial } = revolveAxis(piece.source ?? piece, piece.box);
   const profile = revolveProfile(piece.source ?? piece);
   const { runs, at } = profileRuns(profile.map((p) => [p.x, p.y]));
   const rot = new THREE.Matrix3().setFromMatrix4(piece.world);
@@ -694,6 +733,12 @@ function revolveSilhouette(piece, camera) {
     const s1 = Math.abs(a.y - zApex), s2 = Math.abs(b.y - zApex);
     for (const theta of angles) {
       const radial = u.clone().multiplyScalar(Math.cos(theta)).addScaledVector(v, Math.sin(theta));
+      // Within the sweep: the angle of this radial about the piece's own x axis.
+      if (partial) {
+        const local = radial.clone().applyMatrix3(new THREE.Matrix3().setFromMatrix4(piece.inverse));
+        const t = ((Math.atan2(local.y, local.x) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+        if (t > sweep + 1e-3) continue;
+      }
       const pt = (s) => apex.clone().addScaledVector(axis, s).addScaledVector(radial, s * tan);
       out.push(pt(s1), pt(s2));
     }

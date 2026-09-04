@@ -698,8 +698,10 @@ OpenSCAD is looked up in this order: `OPENSCAD_PATH` → setting →
   grazing direction falls within the arc the corner covers). A curved run is a **torus** — a
   circle revolved is a plain ring with one face and no rim at all, a rounded edge on a turned
   knob a quarter of one — and its silhouette is sampled round the axis from the same closed-form
-  condition. A partial `rotate_extrude(angle)` still falls back to the box and is marked *bounds
-  only*. `Tests/polyhedron.scad`: cone, frustum, tube, countersunk board, ring and knob,
+  condition. A partial `rotate_extrude(angle)` has the same faces over its sweep, plus two flat
+  ends — the profile itself in the planes through the axis at the start and the end of the turn
+  — with arcs for rims and the profile's own edges on the ends; the box is the swept extent, not
+  the whole ring's, and the axis is carried explicitly since it is no longer at the box's centre. `Tests/polyhedron.scad`: cone, frustum, tube, countersunk board, ring, knob and a quarter ring,
   every triangle claimed, 48 rim segments per circle.
 - Line overlays behind semi-transparent geometry still show, because transparent materials
   have `depthWrite` off — visible where piece outlines cross the room walls here.

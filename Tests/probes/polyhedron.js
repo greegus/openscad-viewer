@@ -48,6 +48,8 @@ return {
   // A plain torus: one face, no rim at all, a silhouette. A knob: its rounded edge is a quarter of a torus.
   ring: { faces: faces(9), rimSegments: rims(9), silhouetteSegments: sil(9) > 0 },
   knob: { faces: faces(10), rimSegments: rims(10) },
+  // A quarter turn: the tube's four faces plus two flat ends, arcs for rims and the profile's edges on the ends.
+  quarter: { faces: faces(11), rimSegments: rims(11), silhouetteSegments: sil(11) },
   measured,
   names: c.map((x) => x.name),
   wedge: { faces: (c[1].faces || []).length, edges: (c[1].edges || []).length, claimed: `${cov[1].faces}/${cov[1].inside}` },

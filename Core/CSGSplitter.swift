@@ -146,6 +146,11 @@ extension CSGSplitter {
         var revolve: [[Double]]?
         /// Segments per full turn, as OpenSCAD tessellated it, so rims land on the mesh.
         var fragments: Int?
+        /// How far round the profile is swept, in degrees; nil is a full turn. Less than that
+        /// leaves two flat ends, and the box no longer has the axis at its centre —
+        /// `axisAt` says where, in box coordinates.
+        var sweep: Double?
+        var axisAt: [Double]?
 
         init(matrix: [Double], size: [Double], centered: Bool, approximate: Bool = false,
              profile: [[Double]]? = nil) {
@@ -900,16 +905,36 @@ extension CSGSplitter {
     /// back to the bounding box.
     private static func revolved(_ node: Node, _ transform: [Double]) -> Box? {
         let numbers = named(in: node.args)
-        if let angle = numbers["angle"], abs(angle - 360) > 1e-6 { return nil }
+        let angle = numbers["angle"] ?? 360
+        guard angle > 0, angle <= 360 else { return nil }
         guard let outline = profile(of: node), outline.count >= 3,
               outline.allSatisfy({ $0[0] >= -1e-6 }) else { return nil }
         let radius = outline.map { $0[0] }.max() ?? 0
+        let rInner = outline.map { $0[0] }.min() ?? 0
         let zMin = outline.map { $0[1] }.min() ?? 0, zMax = outline.map { $0[1] }.max() ?? 0
         guard radius > 0, zMax > zMin else { return nil }
-        let placement = multiply(transform, [1, 0, 0, -radius, 0, 1, 0, -radius, 0, 0, 1, zMin, 0, 0, 0, 1])
-        var box = Box(matrix: placement, size: [2 * radius, 2 * radius, zMax - zMin], centered: false)
+
+        // The swept extent in x and y: the outer radius at the sweep's ends and at every axis
+        // direction it passes, the inner radius likewise — a quarter turn is a quarter of the
+        // ring, not the ring's whole box.
+        let full = abs(angle - 360) < 1e-6
+        var xs = [Double](), ys = [Double]()
+        var stops = [0.0, angle]
+        for k in stride(from: 0.0, through: 360.0, by: 90.0) where k > 0 && k < angle { stops.append(k) }
+        for deg in stops {
+            let t = deg * Double.pi / 180
+            for r in [rInner, radius] { xs.append(r * cos(t)); ys.append(r * sin(t)) }
+        }
+        if full { xs = [-radius, radius]; ys = [-radius, radius] }
+        let xMin = xs.min()!, xMax = xs.max()!, yMin = ys.min()!, yMax = ys.max()!
+        let placement = multiply(transform, [1, 0, 0, xMin, 0, 1, 0, yMin, 0, 0, 1, zMin, 0, 0, 0, 1])
+        var box = Box(matrix: placement, size: [xMax - xMin, yMax - yMin, zMax - zMin], centered: false)
         box.revolve = outline.map { [Swift.max(0, $0[0]), $0[1] - zMin] }
         box.fragments = fragments(radius, numbers)
+        if !full {
+            box.sweep = angle
+            box.axisAt = [-xMin, -yMin]
+        }
         return box
     }
 
