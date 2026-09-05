@@ -715,3 +715,6 @@ OpenSCAD is looked up in this order: `OPENSCAD_PATH` → setting →
 - Semi-transparent geometry in the design (the room walls here) draws over everything
   because transparent materials have `depthWrite` off. Correct for glass, slightly muddy
   for large planes.
+- A translucent block placed against a board shares a plane with it; with equal depth offsets
+  the two fought for the pixels frame by frame. Glass sits one depth unit further back than
+  wood, so the board always wins — glass against a wall does not tint the wall.

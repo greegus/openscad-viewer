@@ -540,10 +540,13 @@ function solidMaterial(rgba) {
     depthWrite: !transparent,
     side: THREE.DoubleSide,      // an OpenSCAD mesh need not be 2-manifold
     // Push the fill one depth unit back so line overlays lying exactly on a surface win,
-    // without giving them any advantage over geometry genuinely in front of them.
+    // without giving them any advantage over geometry genuinely in front of them. Glass goes
+    // one unit further: a translucent block placed against a board shares a plane with it,
+    // and with equal offsets the two fought for the pixels frame by frame. Behind by a unit,
+    // the board always wins — glass against a wall does not tint the wall.
     polygonOffset: true,
-    polygonOffsetFactor: 1,
-    polygonOffsetUnits: 1,
+    polygonOffsetFactor: transparent ? 2 : 1,
+    polygonOffsetUnits: transparent ? 2 : 1,
   });
 }
 
