@@ -267,7 +267,14 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
   taken along the *view axis* rather than from the point under the cursor — that keeps
   `camera.position - target` pointing the same way, so a standard view stays active instead of
   being cleared by every click. With nothing under the centre the pivot keeps its distance, so
-  the orbit radius does not jump. Damping is off. Inertia makes it hard to land on a precise angle, which is
+  the orbit radius does not jump. Under an orthographic camera the camera keeps its distance as
+  well as its direction when the pivot moves: the new pivot is always on a surface in front of
+  the old one, so a camera left standing had its orbit radius shrink at every re-aim until, after
+  an afternoon, it stood inside the model and the near plane cut the scene. Its image does not
+  depend on where along the view axis it is, so it is moved back — and its near plane is
+  negative, so nothing in front of it is ever clipped. The grid is fitted to the parts, not to
+  the scene: measured on the scene it fed its own size back and tripled on every reload.
+ Damping is off. Inertia makes it hard to land on a precise angle, which is
   what you want when inspecting a joint.
 - **Edges** are an independent toggle, not tied to the mode, and black in both modes
   (technical-drawing look) — x-ray keeps the normal background, so there is no reason to
@@ -331,11 +338,20 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
     Rebuilt rather than discarded in a shader, because the edge overlay is its own geometry
     derived from the mesh — a shader would leave a hidden piece's edges hanging in the air.
     Measured on the fixture: 52 triangles -> 0 -> 52.
-    A triangle belongs to a piece only when it lies *wholly* inside its box. The welded mesh
-    has triangles spanning several panels, and matching on the centroid alone handed those to
-    whichever box held their middle — hiding one panel then tore a wedge out of its neighbours.
-    Measured on kniznica.scad piece #47 (15 x 450 x 1220): the removed triangles now span
-    exactly 15 x 450 x 1220, not a millimetre beyond.
+    A hidden piece's box is **cut out** of every triangle it reaches into, and the remainder
+    kept (`cutBoxFromPolygons`, the complement of the highlight's `clipToBox`). The two
+    simpler rules both fail on the welded mesh. Matching on the centroid handed a triangle
+    spanning several panels to whichever box held its middle — hiding one panel tore a wedge
+    out of its neighbours. Dropping only triangles lying *wholly* inside the box fixed that
+    but left the opposite hole: the back of kniznica.scad's nested unit — bottom board, back
+    panel, top board, flush at the rear — is welded into one rectangle 770 mm tall that lies
+    wholly inside no piece, so with the whole unit hidden it stayed behind as a grey plane
+    belonging to nothing (the chest's right side and its rear batten did the same). Cutting
+    leaves exactly the neighbours' share: hiding the chest takes 3 of the welded right side's
+    4 triangles' worth and leaves the cabinet's 1220 mm above it; hiding the unit leaves 0
+    triangles in its extent. `Tests/hide.scad` pins all three cases down. Lookups run against
+    a pristine copy of each mesh, since the piece caches hold triangle indices into whatever
+    they scanned and the live geometry shrinks with every hide.
   - Holding the modifier lights up the piece's **faces** as well as its outline, and those are
     exactly the triangles Delete removes — so you see what will go before it goes. A welded
     piece has no triangles of its own, so they are recovered by centroid containment in its box
@@ -612,7 +628,18 @@ switched-off feature stays out of the way instead of stealing the next piece's n
 `<k>` are filled in by the generating loop; any other `<placeholder>` is a model variable and is
 evaluated the same way.
 
-Groups nest, and one left open at the end of the file closes there. `@group` covers what lies
+There is also a one-line form that opens no block:
+
+```openscad
+// @group Komoda   @name Dno
+diel("Komoda dno", ...);
+```
+
+It names the piece under it and says which group it belongs to, so membership travels with the
+statement rather than with its position in the file — a piece moved to another module keeps its
+group, and the order of blocks stops mattering. kniznica.scad switched to it after a batten
+tagged inside one block but evaluated from another module's body put every name after it off
+by one. Groups nest, and one left open at the end of the file closes there. `@group` covers what lies
 between it and its `@endgroup` in reading order, not a module as a whole. Named pieces are
 matched to geometry **by order** — the dump lists geometry in evaluation order, which is the
 order the markers appear in — so `@name` belongs on a call that produces exactly one piece; past

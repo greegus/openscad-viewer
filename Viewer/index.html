@@ -176,7 +176,7 @@ import { STLLoader } from './vendor/STLLoader.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { createMeasure } from './measure.js';
 import { createInspect } from './inspect.js';
-import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, sphereSilhouette, pieceSilhouette, clippedArea, clipToBox, contactPatches, makeClickDetector, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
+import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, cutBoxFromPolygons, triangulateConvex, sphereSilhouette, pieceSilhouette, clippedArea, clipToBox, contactPatches, makeClickDetector, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
 import { updateStrokeResolution } from './strokes.js';
 import { createGrid } from './grid.js';
 import { createPalette } from './palette.js';
@@ -309,16 +309,28 @@ function makeControls() {
 
 /// Keep the camera where it is, but let the grid and the clip planes follow the new model —
 /// an edit can change its size, and planes measured for the old one would clip the new.
+///
+/// Measured on the parts, not on the scene: the scene holds the grid too, a plane three times
+/// the model's radius, so measuring it fed the grid its own size back and it tripled on every
+/// reload — "a grid reaching to infinity" after an afternoon of edits.
 function refit() {
-  const sphere = new THREE.Box3().setFromObject(scene).getBoundingSphere(new THREE.Sphere());
-  if (!(sphere.radius > 0)) return;
-  sceneRadius = Math.max(sphere.radius, 1e-3);
+  const box = new THREE.Box3();
+  for (const p of parts) box.expandByObject(p.mesh);
+  if (box.isEmpty()) return;
+  sceneRadius = Math.max(box.getBoundingSphere(new THREE.Sphere()).radius, 1e-3);
   grid?.fitTo(sceneRadius);
+  setClipPlanes(view.camera);
+}
 
-  const camera = view.camera;
+/// Near and far for a camera at its current distance from the pivot. An orthographic camera
+/// clips nothing on the near side: its image does not depend on where along the view axis it
+/// stands, so a negative near costs nothing and spares the model from being cut by a plane
+/// whenever the camera has drifted into it.
+function setClipPlanes(camera) {
   const distance = camera.position.distanceTo(controls.target);
-  camera.near = Math.max(0.01, Math.min(distance, sceneRadius) / 100);
-  camera.far = distance + sceneRadius * 4;
+  const far = distance + sceneRadius * 4;
+  camera.near = camera.isOrthographicCamera ? -far : Math.max(0.01, Math.min(distance, sceneRadius) / 100);
+  camera.far = far;
   camera.updateProjectionMatrix();
 }
 
@@ -387,6 +399,16 @@ function recentrePivot() {
   // letting the pivot jump, so the feel does not change when the model leaves the middle.
   controls.target.copy(hit ? hit.point
     : pivotRay.ray.origin.clone().addScaledVector(pivotRay.ray.direction, distance));
+
+  // An orthographic camera keeps its distance too: the pivot is always on a surface in front
+  // of the old one, so with the camera left standing the orbit radius only ever shrank, and
+  // after an afternoon of re-aiming the camera stood inside the model. Its image does not
+  // depend on where along the view axis it is, so moving it back costs nothing to see.
+  if (view.camera.isOrthographicCamera) {
+    const dir = view.camera.position.clone().sub(controls.target).normalize();
+    view.camera.position.copy(controls.target).addScaledVector(dir, distance);
+    setClipPlanes(view.camera);
+  }
 }
 
 /// The first visible part under a pixel, for the tools that cut or aim at a face.
@@ -422,14 +444,11 @@ function setProjection(kind) {
   // Both cameras need clip planes that reach the model. The perspective camera's defaults
   // (0.1 to 1000) are nowhere near a design measured in millimetres, which is why switching to
   // it used to show an empty view: everything sat beyond the far plane.
-  to.near = Math.max(0.01, Math.min(distance, sceneRadius) / 100);
-  to.far = distance + sceneRadius * 4;
-
   if (to.isOrthographicCamera) {
     to.zoom = 1;
     frameOrtho(halfHeight);
   }
-  to.updateProjectionMatrix();
+  setClipPlanes(to);
   view.camera = to;
   makeControls();
   window.webkit?.messageHandlers?.viewer?.postMessage('projection: ' + kind);
@@ -636,13 +655,10 @@ function fit() {
   const distance = radius / Math.tan((perspective.fov / 2) * Math.PI / 180) * 1.08;
   const dir = modelVector(VIEWS['3d'].dir);
   const camera = view.camera;
-  camera.near = radius / 100;
-  camera.far = distance + radius * 4;
   camera.position.copy(sphere.center).addScaledVector(dir, distance);
   if (camera.isOrthographicCamera) frameOrtho(radius * 1.08);
-  camera.updateProjectionMatrix();
-
   controls.target.copy(sphere.center);
+  setClipPlanes(camera);
   controls.maxDistance = distance * 4;
   controls.update();
 }
@@ -688,7 +704,13 @@ function addPart(buffer, rgba) {
     scene.add(orientToWorld(o));
   }
 
-  parts.push({ mesh, xray, geometry, source: geometry.clone(), rgba });
+  // `pristine` stands in for the mesh wherever triangles are looked up for hiding: the same
+  // placement, but the untouched geometry. The piece caches key on the object they scanned and
+  // hold triangle indices into it, so scanning the live mesh after a rebuild would return
+  // indices into the reduced geometry and then apply them to the full one.
+  const source = geometry.clone();
+  parts.push({ mesh, xray, geometry, source, rgba,
+               pristine: { geometry: source, matrixWorld: mesh.matrixWorld } });
 }
 
 /// Draws the outline of every individual piece.
@@ -764,19 +786,34 @@ function applyHidden() {
   const dropped = components.filter((c) => hiddenIds.has(c.id));
 
   for (const part of parts) {
-    const drop = new Set();
+    // Every hidden piece a triangle reaches into. A welded face can span several pieces, so
+    // a triangle is not dropped or kept whole: each hidden box is cut out of it in turn and
+    // only the remainder — the neighbours' share of that face — is kept.
+    const touched = new Map();
     for (const component of dropped) {
-      for (const t of trianglesInBox(part.mesh, component)) drop.add(t);
+      for (const t of trianglesTouchingBox(part.pristine, component)) {
+        if (!touched.has(t)) touched.set(t, []);
+        touched.get(t).push(component);
+      }
     }
 
     const source = part.source.attributes.position;
     const kept = [];
     for (let t = 0; t < source.count / 3; t++) {
-      if (drop.has(t)) continue;
-      for (let k = 0; k < 3; k++) {
-        const i = (t * 3 + k) * 3;
-        kept.push(source.array[i], source.array[i + 1], source.array[i + 2]);
+      const cutters = touched.get(t);
+      if (!cutters) {
+        for (let k = 0; k < 3; k++) {
+          const i = (t * 3 + k) * 3;
+          kept.push(source.array[i], source.array[i + 1], source.array[i + 2]);
+        }
+        continue;
       }
+      let polygons = [[0, 1, 2].map((k) => new THREE.Vector3().fromBufferAttribute(source, t * 3 + k))];
+      for (const component of cutters) {
+        polygons = cutBoxFromPolygons(part.pristine, polygons, component);
+        if (!polygons.length) break;
+      }
+      triangulateConvex(polygons, kept);
     }
 
     const geometry = new THREE.BufferGeometry();
@@ -1046,6 +1083,8 @@ window.debug = {
       xray: p.xray.visible,
     })),
     status: status.textContent,
+    sceneRadius, cameraDistance: view.camera.position.distanceTo(controls.target), near: view.camera.near, far: view.camera.far,
+    target: controls.target.toArray().map(Math.round), cameraPos: view.camera.position.toArray().map(Math.round),
     panel: [document.body.clientWidth, document.body.clientHeight],
   }),
 
@@ -1082,6 +1121,8 @@ window.debug = {
   components: () => components,
   features: () => inspect?.features() ?? [],
   pieceCoverage: () => inspect?.pieceCoverage() ?? null,
+  refit: () => refit(),
+  recentre: () => recentrePivot(),
   /// Diagnostic: the area each plane face of a piece actually has in the mesh (its claimed
   /// triangles), plus its patches — against the face's nominal size.
   faceAreas: (id) => {
@@ -1305,6 +1346,25 @@ window.debug = {
   // missed on one of them leaves its edges hanging in the cut.
   selectPiece: (id) => { setTool('inspect'); inspect?.selectPiece(id); tree.select(id); },
   hidden: () => [...hiddenIds],
+  /// Triangles of the *current* meshes lying wholly inside a model-space box — what is left on
+  /// screen in that region after hiding, as opposed to what the pieces claim.
+  trianglesWithin: (min, max, slack = 0.01) => {
+    let n = 0;
+    for (const part of parts) {
+      const position = part.mesh.geometry.attributes.position;
+      for (let t = 0; t < position.count / 3; t++) {
+        let inside = true;
+        for (let k = 0; k < 3 && inside; k++) {
+          const i = (t * 3 + k) * 3;
+          const p = [position.array[i], position.array[i + 1], position.array[i + 2]];
+          inside = [0, 1, 2].every((a) => p[a] >= min[a] - slack && p[a] <= max[a] + slack);
+        }
+        if (inside) n++;
+      }
+    }
+    return n;
+  },
+  triangles: () => parts.reduce((n, p) => n + p.mesh.geometry.attributes.position.count / 3, 0),
   hide: () => hideSelection(),
   selection: () => inspect?.selection() ?? null,
   restore: () => restore(),

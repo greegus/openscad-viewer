@@ -46,6 +46,16 @@ expect "wall ends without the panel" "$(echo "$out" | field "['wallEndTriangles'
 expect "lower board's covered top is still a face" "$(echo "$out" | field "['lowerTopPatch']")" "2000"
 expect "pieces in several meshes" "$(echo "$out" | field "['inSeveralMeshes']")" "0"
 
+echo "Tests/hide.scad"
+out=$(Tests/probe.sh Tests/hide.scad Tests/probes/hide.js) || { echo "  probe failed: $out"; exit 1; }
+expect "one-line @group/@name form: names"  "$(echo "$out" | field "['names']")"  '["Bottom", "Back", "Top", "Side board"]'
+expect "one-line @group/@name form: groups" "$(echo "$out" | field "['groups']")" '["Unit", "Unit", "Unit", "Neighbour"]'
+expect "welded rear plane present before hiding" "$(echo "$out" | field "['rearBefore']")" "true"
+expect "unit hidden: nothing left, rear plane gone, neighbour intact" "$(echo "$out" | field "['unitHidden']")" '{"leftInUnit": 0, "rearPlane": 0, "sideIntact": true}'
+expect "back alone hidden: boards keep their strips of the welded face" "$(echo "$out" | field "['backHidden']")" '{"bottomRearStrip": true, "leftInBack": 0, "topRearStrip": true}'
+expect "neighbour hidden: unit's rear untouched" "$(echo "$out" | field "['sideHidden']")" '{"leftOnSideFace": 0, "unitRearIntact": true}'
+expect "restore brings every triangle back" "$(echo "$out" | field "['restored']")" "true"
+
 echo "Tests/demo.scad"
 out=$(Tests/probe.sh Tests/demo.scad Tests/probes/demo.js) || { echo "  probe failed: $out"; exit 1; }
 expect "names in order" "$(echo "$out" | field "['names']")" '["Corpus: Left side", "Corpus: Right side", "Corpus: Bottom", "Corpus: Top", "Corpus: Back panel", "Shelves: Lower shelf", "Shelves: Upper shelf", "Door: Door"]'

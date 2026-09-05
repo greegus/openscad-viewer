@@ -9,6 +9,10 @@ import Foundation
 ///         // @name Rebro <i>   @count podstava_rebra
 ///     // @endgroup
 ///
+/// or, per piece, with the group named on the same line and nothing to close:
+///
+///     // @group Komoda   @name Dno
+///
 /// Markers are matched to geometry by order, which is why `@count` and `@repeat` matter: a
 /// statement inside a loop or behind a condition produces a number of pieces the comment alone
 /// cannot reveal, and without that number every name after it would be off by however many were
@@ -51,7 +55,16 @@ enum Annotations {
             guard let comment = line.range(of: "//") else { continue }
             let text = line[comment.upperBound...].trimmingCharacters(in: .whitespaces)
 
-            if let (name, extra) = tagged("@group", in: text) {
+            if let (group, rest) = tagged("@group", in: text),
+               let (name, extra) = tagged("@name", in: rest) {
+                // The one-line form: `// @group Komoda   @name Dno` names the piece under it
+                // and says which group it belongs to, opening nothing. Membership then
+                // travels with the statement, so a piece moved to another module keeps its
+                // group and the order of blocks in the file stops mattering.
+                guard namesSomething(after: index) else { continue }
+                result.append(Marker(name: name, groups: open.map(\.name) + [group],
+                                     count: value(of: "@count", in: extra)))
+            } else if let (name, extra) = tagged("@group", in: text) {
                 open.append(Group(name: name, repeats: value(of: "@repeat", in: extra)))
             } else if text.hasPrefix("@endgroup") {
                 if !open.isEmpty { open.removeLast() }
@@ -70,6 +83,7 @@ enum Annotations {
             guard let comment = line.range(of: "//") else { continue }
             let text = line[comment.upperBound...].trimmingCharacters(in: .whitespaces)
             if text.contains("<Meno>") || text.contains("<výraz>") { continue }
+            if text.contains("@name") { continue }          // one-line form opens no block
             if let (name, extra) = tagged("@group", in: text) {
                 result.append(Group(name: name, repeats: value(of: "@repeat", in: extra)))
             }

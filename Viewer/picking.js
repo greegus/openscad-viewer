@@ -1244,6 +1244,81 @@ export function clipToBox(mesh, triangles, component, slack = 0.5) {
   return out;
 }
 
+/// Cuts a piece's box *out* of triangles, keeping what lies outside it. The complement of
+/// `clipToBox`, for hiding rather than showing.
+///
+/// Hiding used to drop every triangle lying wholly inside the box and keep every other one
+/// untouched. CGAL welds flush faces, so the back of the nested unit — its bottom board, its
+/// back panel and its top board, all flush at the rear — comes out as one rectangle spanning
+/// three pieces. Such a triangle lies wholly inside no piece, so hiding the whole group left
+/// it standing: two grey planes where the unit had been, belonging to nothing that could be
+/// switched off. Cutting the box out instead leaves exactly the neighbours' share of the
+/// welded face, so hiding one board takes precisely that board and nothing else.
+///
+/// `polygons` are in the mesh's own coordinates and come back in them, so the result can be
+/// written straight into the rebuilt geometry. Each polygon is split against the six planes in
+/// turn: the part outside a plane is final, the part inside goes on to the next plane, and
+/// whatever survives all six lay inside the box and is discarded. Every piece stays convex, so
+/// a fan triangulation is exact. Slack is small: 0.5 mm, as used for membership tests, would
+/// shave a visible sliver off a board flush beside the hidden one.
+export function cutBoxFromPolygons(mesh, polygons, component, slack = 0.02) {
+  const box = prepareBox(component);
+  const toPiece = meshToPiece(mesh, box);
+  const fromPiece = toPiece.clone().invert();
+
+  const planes = [
+    { axis: 'x', sign: 1, at: box.min.x - slack }, { axis: 'x', sign: -1, at: box.max.x + slack },
+    { axis: 'y', sign: 1, at: box.min.y - slack }, { axis: 'y', sign: -1, at: box.max.y + slack },
+    { axis: 'z', sign: 1, at: box.min.z - slack }, { axis: 'z', sign: -1, at: box.max.z + slack },
+  ];
+
+  const out = [];
+  for (const source of polygons) {
+    let inside = source.map((p) => p.clone().applyMatrix4(toPiece));
+
+    for (const plane of planes) {
+      if (inside.length < 3) break;
+      const isIn = (p) => plane.sign * (p[plane.axis] - plane.at) >= 0;
+      const stillIn = [];
+      const outside = [];
+      for (let i = 0; i < inside.length; i++) {
+        const a = inside[i];
+        const b = inside[(i + 1) % inside.length];
+        const aIn = isIn(a);
+        const bIn = isIn(b);
+        if (aIn) stillIn.push(a); else outside.push(a);
+        if (aIn !== bIn) {
+          const d = b[plane.axis] - a[plane.axis];
+          if (Math.abs(d) > 1e-12) {
+            const x = a.clone().lerp(b, (plane.at - a[plane.axis]) / d);
+            stillIn.push(x);
+            outside.push(x.clone());
+          }
+        }
+      }
+      if (outside.length >= 3) out.push(outside.map((p) => p.applyMatrix4(fromPiece)));
+      inside = stillIn;
+    }
+    // `inside` now lies within the box: that is the hidden piece's share, and it goes.
+  }
+  return out;
+}
+
+/// Fan-triangulates convex polygons into a flat position array, skipping degenerate slivers.
+export function triangulateConvex(polygons, out = []) {
+  const ab = new THREE.Vector3();
+  const ac = new THREE.Vector3();
+  for (const polygon of polygons) {
+    for (let i = 1; i + 1 < polygon.length; i++) {
+      const a = polygon[0], b = polygon[i], c = polygon[i + 1];
+      ab.subVectors(b, a); ac.subVectors(c, a);
+      if (ab.cross(ac).lengthSq() < 1e-8) continue;     // area below 5e-5 mm²: noise
+      out.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+    }
+  }
+  return out;
+}
+
 /// Triangles of `mesh` that reach into a piece's box at all.
 ///
 /// For *showing* a piece, unlike hiding it. CGAL welds coplanar faces, so a triangle can cover
