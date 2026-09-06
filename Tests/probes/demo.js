@@ -44,8 +44,11 @@ const cube = (() => {
   canvas.dispatchEvent(ev('pointermove', cx + 40, cy));
   canvas.dispatchEvent(ev('pointerup', cx + 40, cy));
   const afterDrag = window.debug.state().activeView;
-  setView('3d');
-  return { topRegion, afterClick, afterDrag };
+  // Home: the framing the file opened with, from wherever the camera was.
+  document.getElementById('home').click();
+  window.debug.snapshot();
+  const home = window.debug.cameraDirection().join(',');
+  return { topRegion, afterClick, afterDrag, home };
 })();
 const c = window.debug.components();
 const cov = window.debug.pieceCoverage();

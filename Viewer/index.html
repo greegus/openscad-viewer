@@ -137,6 +137,19 @@
   }
   /* Nothing to say, nothing to draw — otherwise an empty pill floats there. */
   #readout:empty { display: none; }
+  /* Home, left of the view cube: back to the framing the file opened with. */
+  #home {
+    position: absolute; top: 12px; right: 138px;      /* cube is 118 wide at 12 from the edge */
+    width: 30px; height: 30px; padding: 0;
+    display: grid; place-items: center;
+    appearance: none; border: 0; cursor: default; border-radius: 8px;
+    color: rgba(255, 255, 255, 0.8); background: rgba(18, 20, 24, 0.62);
+    backdrop-filter: blur(16px) saturate(1.4);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.12);
+  }
+  #home:hover { background: rgba(40, 44, 52, 0.75); color: white; }
+  #home svg { width: 16px; height: 16px; display: block; }
   /* The tools, floating at the bottom centre: glass like the other panels. */
   #tools {
     position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
@@ -159,6 +172,11 @@
 <canvas id="canvas"></canvas>
 <div id="status">Rendering mesh…</div>
 <div id="readout"></div>
+<button id="home" title="Home view — the whole model, from the front-right-above">
+  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M2.5 8.2 8 3.2l5.5 5" /><path d="M4 7.6V13h8V7.6" /><path d="M6.8 13V9.8h2.4V13" />
+  </svg>
+</button>
 <div id="tools">
   <button class="tool-btn" data-tool="inspect">Inspect</button>
   <button class="tool-btn" data-tool="measure">Measure</button>
@@ -1134,6 +1152,15 @@ window.openPalette = () => palette.open();
 window.addEventListener('keydown', (event) => {
   if (event.key === 'k' && event.metaKey) { palette.toggle(); event.preventDefault(); }
 }, true);
+
+/// The home view: the whole model framed from the front-right-above, as the file opened — the
+/// camera only; the model, the hidden pieces and the tools stay as they are.
+function homeView() {
+  cameraTween = null;
+  fit();
+  if (activeView) { activeView = null; window.webkit?.messageHandlers?.viewer?.postMessage('view: none'); }
+}
+document.getElementById('home').addEventListener('click', homeView);
 
 /// Back to how the file opened: geometry re-read, hidden pieces back, camera reframed.
 window.resetView = () => {
