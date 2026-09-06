@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { MODEL_TO_WORLD } from './picking.js';
+import { MODEL_TO_WORLD, worldToModelVector } from './picking.js';
 
 /// The view cube: a small cube in the top right corner that shows which way the model faces and
 /// turns the camera when clicked or dragged.
@@ -47,7 +47,7 @@ export function createViewCube({ renderer, canvas, view, controls, onAim, onOrbi
     ctx.fillStyle = '#d7d9dd';
     ctx.fillRect(0, 0, 256, 256);
     ctx.fillStyle = '#2b2e33';
-    ctx.font = '600 44px -apple-system, system-ui, sans-serif';
+    ctx.font = '600 58px -apple-system, system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(text, 128, 132);
@@ -118,6 +118,7 @@ export function createViewCube({ renderer, canvas, view, controls, onAim, onOrbi
     // device pixels, on a Retina screen the main viewport came back twice too large.)
     // The cube's camera looks at the origin from the main camera's direction, with its up.
     const dir = view.camera.position.clone().sub(controls.target).normalize();
+    markActive(worldToModelVector(dir).normalize());
     cubeCamera.position.copy(dir).multiplyScalar(6);
     cubeCamera.up.copy(view.camera.up);
     cubeCamera.lookAt(0, 0, 0);
@@ -145,12 +146,36 @@ export function createViewCube({ renderer, canvas, view, controls, onAim, onOrbi
     return hit ? regions.get(hit.object.userData.key) : null;
   }
 
-  let hovered = null;
+  // Two tints: the region the camera is looking along (the current view) and the one under the
+  // pointer. Hover wins where they meet; the plain colour returns when neither applies.
+  const ACTIVE = 0x4f8fd8, ACTIVE_LABEL = 0xbcd6f5;
+  let hovered = null, active = null;
+  function paint(region) {
+    const state = region === hovered ? 'hover' : region === active ? 'active' : 'base';
+    for (const m of region.meshes) {
+      const labelled = !!m.material.map;
+      m.material.color.set(state === 'hover' ? (labelled ? 0x9ec9ff : HOVER)
+                         : state === 'active' ? (labelled ? ACTIVE_LABEL : ACTIVE)
+                         : (labelled ? 0xffffff : BASE));
+    }
+  }
   function highlight(region) {
     if (hovered === region) return;
-    if (hovered) for (const m of hovered.meshes) m.material.color.set(m.material.map ? 0xffffff : BASE);
+    const was = hovered;
     hovered = region;
-    if (hovered) for (const m of hovered.meshes) m.material.color.set(m.material.map ? 0x9ec9ff : HOVER);
+    if (was) paint(was);
+    if (hovered) paint(hovered);
+  }
+  /// The region the camera looks along, if it is within half a degree of one — lit so the cube
+  /// says which standard or three-quarter view is on, not only which way is up.
+  function markActive(dirModel) {
+    let found = null;
+    for (const region of regions.values()) if (region.dir.dot(dirModel) > Math.cos(0.5 * Math.PI / 180)) { found = region; break; }
+    if (found === active) return;
+    const was = active;
+    active = found;
+    if (was) paint(was);
+    if (active) paint(active);
   }
 
   // --- input, ahead of everything else on the canvas ---

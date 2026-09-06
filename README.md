@@ -264,8 +264,9 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
 - **View cube** (`Web/viewcube.js`), top right: a small cube drawn in the model's own axes — Top
   is the model's +z, Front its −y — so it reads the same way the standard views do. Its 26
   regions are the six faces, twelve edges and eight corners; clicking one turns the camera to
-  look along it (a face gives a standard view and lights the matching view button, an edge or
-  corner a three-quarter view), over a quarter of a second so the eye can follow. Dragging on it
+  look along it (a face a standard view, an edge or corner a three-quarter one) over a quarter of
+  a second so the eye can follow, and the region the camera currently looks along is lit, so the
+  cube says which view is on and not only which way is up. It replaced the row of view buttons. Dragging on it
   orbits exactly as dragging on the model does — about the camera's own up, as OrbitControls
   does. It renders into a scissored viewport after the main scene with its own orthographic
   camera copying the main camera's orientation; its pointer events are taken in capture, ahead
