@@ -182,6 +182,7 @@ import { createGrid } from './grid.js';
 import { createPalette } from './palette.js';
 import { createTree } from './tree.js';
 import { createSection } from './section.js';
+import { createViewCube } from './viewcube.js';
 
 const canvas = document.getElementById('canvas');
 const status = document.getElementById('status');
@@ -421,6 +422,17 @@ function raycastParts(px) {
 
 makeControls();
 
+const viewCube = createViewCube({
+  renderer, canvas, view, controls,
+  onAim: (dirModel) => {
+    // A face is a standard view with its own up; anything else keeps the model's z up.
+    const name = viewNamed(dirModel);
+    const up = name ? VIEWS[name].up : [0, 0, 1];
+    aimCamera(modelVector(dirModel), modelVector(up), 250);
+  },
+  onOrbit: orbitBy,
+});
+
 function setProjection(kind) {
   const to = kind === 'isometric' ? orthographic : perspective;
   const from = view.camera;
@@ -462,25 +474,82 @@ const VIEWS = {
   left:    { dir: [-1, 0, 0],          up: [0, 0, 1] },
   right:   { dir: [1, 0, 0],           up: [0, 0, 1] },
   back:    { dir: [0, 1, 0],           up: [0, 0, 1] },
-  top:     { dir: [0, 0, 1],           up: [0, -1, 0] },   // front edge towards the viewer
+  top:     { dir: [0, 0, 1],           up: [0, 1, 0] },    // front edge at the bottom, towards the viewer
   bottom:  { dir: [0, 0, -1],          up: [0, 1, 0] },
 };
 
 /// Points the camera along a standard direction, keeping the current distance and target so
-/// the switch does not also re-zoom.
+/// the switch does not also re-zoom. Instant: the view buttons and the tests expect the camera
+/// there at once.
 function setView(name) {
   const preset = VIEWS[name];
   if (!preset || !controls) return;
-  activeView = name;                 // set before update(), whose 'change' checks it
+  aimCamera(modelVector(preset.dir), modelVector(preset.up), 0);
+}
+
+/// The standard view a direction is, if it is one — so a click on the cube's Front face leaves
+/// the view buttons showing Front, as the button itself would.
+function viewNamed(dirModel) {
+  for (const [name, preset] of Object.entries(VIEWS)) {
+    if (name === '3d') continue;
+    if (new THREE.Vector3(...preset.dir).normalize().dot(dirModel) > 0.9999) return name;
+  }
+  return null;
+}
+
+/// Turns the camera to look along `dir` (world) with `up` (world), keeping distance and target,
+/// over `duration` ms — the cube animates so the eye can follow the turn, the buttons do not.
+let cameraTween = null;
+function aimCamera(dir, up, duration = 250) {
   const camera = view.camera;
   const distance = camera.position.distanceTo(controls.target) || 1;
+  const fromDir = camera.position.clone().sub(controls.target).normalize();
+  const name = viewNamed(worldToModelVector(dir).normalize());
+  const finish = () => {
+    activeView = name;               // set before update(), whose 'change' checks it
+    camera.up.copy(up);
+    camera.position.copy(controls.target).addScaledVector(dir, distance);
+    camera.lookAt(controls.target);
+    camera.updateProjectionMatrix();
+    controls.update();
+    window.webkit?.messageHandlers?.viewer?.postMessage('view: ' + (name ?? 'none'));
+  };
+  if (duration <= 0 || fromDir.angleTo(dir) < 1e-4) { cameraTween = null; finish(); return; }
+  const fromUp = camera.up.clone();
+  activeView = null;
+  cameraTween = {
+    start: performance.now(), duration,
+    step(t) {
+      const k = t * t * (3 - 2 * t);                 // ease in and out
+      const d = fromDir.clone().lerp(dir, k).normalize();
+      camera.up.copy(fromUp.clone().lerp(up, k).normalize());
+      camera.position.copy(controls.target).addScaledVector(d, distance);
+      camera.lookAt(controls.target);
+      camera.updateProjectionMatrix();
+    },
+    finish,
+  };
+}
 
-  camera.up.copy(modelVector(preset.up));
-  camera.position.copy(controls.target).addScaledVector(modelVector(preset.dir), distance);
+/// Orbits the camera by a pointer delta, as OrbitControls would for a drag on the model —
+/// what a drag on the view cube does.
+function orbitBy(dx, dy) {
+  const camera = view.camera;
+  // About the camera's own up, as OrbitControls does — so a drag on the cube turns the scene
+  // exactly as the same drag on the model would, from the top view included.
+  const toY = new THREE.Quaternion().setFromUnitVectors(camera.up, new THREE.Vector3(0, 1, 0));
+  const offset = camera.position.clone().sub(controls.target).applyQuaternion(toY);
+  const spherical = new THREE.Spherical().setFromVector3(offset);
+  spherical.theta -= dx * 0.01;
+  spherical.phi = Math.max(0.02, Math.min(Math.PI - 0.02, spherical.phi - dy * 0.01));
+  offset.setFromSpherical(spherical).applyQuaternion(toY.clone().invert());
+  camera.position.copy(controls.target).add(offset);
   camera.lookAt(controls.target);
-  camera.updateProjectionMatrix();
   controls.update();
-  window.webkit?.messageHandlers?.viewer?.postMessage('view: ' + name);
+  if (activeView) {
+    activeView = null;
+    window.webkit?.messageHandlers?.viewer?.postMessage('view: none');
+  }
 }
 
 function frameOrtho(halfHeight) {
@@ -950,12 +1019,23 @@ async function load() {
   }
 }
 
+/// One step of the camera's turn, by the clock. Called every frame, and by the test snapshot,
+/// since a hidden window gets no animation frames.
+function advanceCamera(now = performance.now()) {
+  if (!cameraTween) return;
+  const t = Math.min(1, (now - cameraTween.start) / cameraTween.duration);
+  cameraTween.step(t);
+  if (t >= 1) { const done = cameraTween; cameraTween = null; done.finish(); }
+}
+
 function tick() {
+  advanceCamera();
   controls.update();
   updateSilhouettes();
   measure?.update();
   inspect?.update();
   renderer.render(scene, view.camera);
+  viewCube?.render();
   requestAnimationFrame(tick);
 }
 tick();
@@ -1121,6 +1201,7 @@ window.debug = {
   components: () => components,
   features: () => inspect?.features() ?? [],
   pieceCoverage: () => inspect?.pieceCoverage() ?? null,
+  viewCube: () => ({ size: viewCube.size, margin: 12, regionAt: (x, y) => viewCube.regionAt(x, y)?.dir.toArray().map((v) => +v.toFixed(2)) ?? null }),
   refit: () => refit(),
   recentre: () => recentrePivot(),
   /// Diagnostic: the area each plane face of a piece actually has in the mesh (its claimed
@@ -1262,7 +1343,9 @@ window.debug = {
     const r = canvas.getBoundingClientRect();
     return [Math.round((ndc.x * 0.5 + 0.5) * r.width), Math.round((-ndc.y * 0.5 + 0.5) * r.height)];
   },
-  snapshot: () => { renderer.render(scene, view.camera); return canvas.toDataURL('image/png'); },
+  snapshot: () => { advanceCamera(); renderer.render(scene, view.camera); viewCube?.render(); return canvas.toDataURL('image/png'); },
+  /// Finishes any camera turn in progress, for tests: a hidden window gets no animation frames.
+  settleCamera: () => { if (cameraTween) advanceCamera(cameraTween.start + cameraTween.duration); },
   /// Regression check: hover and selection of one piece must paint the same pixels. Measured on
   /// the framebuffer, not on the buffers — the one time they disagreed, the buffers were
   /// identical and the GPU drew fewer segments for hover than it had been given. The hover

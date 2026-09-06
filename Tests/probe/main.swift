@@ -32,7 +32,7 @@ window.orderBack(nil)
 window.contentView?.layoutSubtreeIfNeeded()
 viewer.preparePreviewOfFile(at: URL(fileURLWithPath: CommandLine.arguments[1])) { _ in }
 
-let js = "(() => { " + script + " })()"
+let js = script          // a function body: `return` works, and a returned promise is awaited
 var waited = 0.0
 
 /// Polls until the page reports pieces, then runs the probe. A render can take a minute the
@@ -42,8 +42,12 @@ func poll() {
     web.evaluateJavaScript("window.debug && window.debug.state().status === '' && window.debug.state().pieces > 0") { v, _ in
         if (v as? Bool) == true {
             web.evaluateJavaScript("window.debug.snapshot(); true") { _, _ in
-                web.evaluateJavaScript(js) { result, error in
-                    if let error { print("error: \(error.localizedDescription)"); exit(1) }
+                web.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { outcome in
+                    var result: Any? = nil
+                    switch outcome {
+                    case .success(let value): result = value
+                    case .failure(let error): print("error: \(error.localizedDescription)"); exit(1)
+                    }
                     if let data = try? JSONSerialization.data(withJSONObject: result ?? NSNull(), options: [.fragmentsAllowed]),
                        let text = String(data: data, encoding: .utf8) {
                         print(text)

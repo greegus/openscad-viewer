@@ -261,6 +261,18 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
   distance to change, so there it moves `camera.zoom`, matching what OrbitControls does.
   `window.debug.pinch()` reports the current speed and the last delta seen — the multiplier can
   only really be judged against a real trackpad.
+- **View cube** (`Web/viewcube.js`), top right: a small cube drawn in the model's own axes — Top
+  is the model's +z, Front its −y — so it reads the same way the standard views do. Its 26
+  regions are the six faces, twelve edges and eight corners; clicking one turns the camera to
+  look along it (a face gives a standard view and lights the matching view button, an edge or
+  corner a three-quarter view), over a quarter of a second so the eye can follow. Dragging on it
+  orbits exactly as dragging on the model does — about the camera's own up, as OrbitControls
+  does. It renders into a scissored viewport after the main scene with its own orthographic
+  camera copying the main camera's orientation; its pointer events are taken in capture, ahead
+  of the tools and the controls. (Viewport and scissor take CSS pixels — given device pixels, on
+  a Retina screen the main viewport came back twice too large.) The Top view puts the front edge
+  at the bottom of the screen, as its comment always said; the code had it the other way round,
+  which the cube's upside-down TOP label was the first to show.
 - **Controls** orbit around what the camera is aimed at, not the centre of the model: a
   detail you have zoomed into stays put when you rotate, instead of swinging away around the
   scene centre. The pivot is re-aimed as a gesture begins, one raycast per gesture, and is

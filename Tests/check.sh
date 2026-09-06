@@ -62,6 +62,7 @@ expect "names in order" "$(echo "$out" | field "['names']")" '["Corpus: Left sid
 expect "every piece covered by its faces" "$(echo "$out" | field "['covered']")" "true"
 expect "shelf pitch"     "$(echo "$out" | field "['pitch']")" "Parallel faces · distance 305.0 mm"
 expect "section by clicking a face" "$(echo "$out" | field "['section']")" "ready z=300 keeping - caps=true"
+expect "view cube: click TOP, then drag" "$(echo "$out" | field "['cube']")" '{"afterClick": "top 0,0,1", "afterDrag": null, "topRegion": [0, 0, 1]}'
 expect "shelves and bottom resting on the side patch it" "$(echo "$out" | field "['shelfPatches']")" "20160"
 
 if [ $# -ge 1 ]; then
