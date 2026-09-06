@@ -75,14 +75,6 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
     ]
 
     /// Standard viewing directions.
-    /// The initial camera is a three-quarter view, which is not one of these — so the picker
-    /// starts with nothing selected rather than claiming a direction the camera is not on.
-    private static let views: [(title: String, id: String)] = [
-        ("Front", "front"), ("Back", "back"),
-        ("Left", "left"), ("Right", "right"),
-        ("Top", "top"), ("Bottom", "bottom"),
-    ]
-
 
     /// 3D display modes. Adding another (wireframe, section) is one line here and in index.html.
     private static let modes: [(title: String, id: String)] = [
@@ -94,7 +86,6 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
     private var modePicker: NSSegmentedControl!
     private var controlRow: NSStackView!
     private var projectionPicker: NSSegmentedControl!
-    private var viewPicker: NSSegmentedControl!
     private var edgesToggle: NSButton!
     private let spinner = NSProgressIndicator()
     private let message = NSTextField(labelWithString: "")
@@ -123,10 +114,6 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
                                               target: self, action: #selector(changeProjection))
         projectionPicker.selectedSegment = 1      // isometric by default
 
-        viewPicker = NSSegmentedControl(labels: Self.views.map(\.title), trackingMode: .selectOne,
-                                        target: self, action: #selector(changeViewDirection))
-        viewPicker.selectedSegment = -1
-        viewPicker.translatesAutoresizingMaskIntoConstraints = false
         projectionPicker.translatesAutoresizingMaskIntoConstraints = false
 
         edgesToggle = NSButton(checkboxWithTitle: "Edges", target: self, action: #selector(toggleEdges))
@@ -148,19 +135,18 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
         // the left edge when it does not, rather than being cut off on both sides.
         // The tools (Inspect, Measure, Section) live in the page, as a floating panel at the
         // bottom of the view, so their state and their look stay with the tools themselves.
-        controlRow = NSStackView(views: [modePicker, projectionPicker, viewPicker, edgesToggle])
+        // The standard views are the view cube's, in the page; the row keeps mode, projection
+        // and edges.
+        controlRow = NSStackView(views: [modePicker, projectionPicker, edgesToggle])
         controlRow.orientation = .horizontal
         controlRow.alignment = .centerY
         controlRow.spacing = 10
-        controlRow.setCustomSpacing(14, after: viewPicker)
         controlRow.translatesAutoresizingMaskIntoConstraints = false
 
         // The viewer tells us when the camera has been rotated off a preset direction.
         webView.onMessage = { [weak self] text in
             guard let self else { return }
-            if text == "view: none" {
-                DispatchQueue.main.async { self.viewPicker.selectedSegment = -1 }
-            } else if text.hasPrefix("action: ") {
+            if text.hasPrefix("action: ") {
                 let id = String(text.dropFirst("action: ".count))
                 DispatchQueue.main.async { self.onHostAction?(id) }
             }
@@ -230,12 +216,6 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
 
     @objc private func changeProjection() {
         webView.setProjection(Self.projections[projectionPicker.selectedSegment].id)
-    }
-
-    @objc private func changeViewDirection() {
-        let index = viewPicker.selectedSegment
-        guard Self.views.indices.contains(index) else { return }
-        webView.setView(Self.views[index].id)
     }
 
     @objc private func changeDisplayMode() {
