@@ -613,7 +613,9 @@ and lets you look inside. With the tool on, **click a face** and the cut goes th
 point, perpendicular to the model axis nearest the face's normal — every cut worth making in
 furniture is axis-aligned — with the half toward you removed, since looking inside is the point;
 half a millimetre into the material, or the face's own skin and the cap would fight for the
-pixels. Clicking another face cuts there instead. Arrow keys move the plane 1 mm, Shift 10 mm,
+pixels. Before the click, a **ghost** of that cut follows the pointer: a translucent sheet in the
+plane the click would cut along, the size of the whole model across it, so the cut is not a guess.
+Clicking another face cuts there instead. Arrow keys move the plane 1 mm, Shift 10 mm,
 Tab flips the kept side, Escape stops. `Cut along X/Y/Z` from the palette starts in the middle
 of the model, because a plane at the edge cuts nothing and looks broken. The cut takes the edge
 overlay and the silhouettes with it, so no line hangs in the cut. (The readout had promised

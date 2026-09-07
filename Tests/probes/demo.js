@@ -26,8 +26,12 @@ const section = (() => {
   }
   window.debug.snapshot();
   const d = window.debug.section();
+  // The ghost: over the same shelf the cut's sheet sits at its height, the model's size across.
+  canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: rect.left + px[0], clientY: rect.top + px[1], bubbles: true, pointerId: 1 }));
+  window.debug.snapshot();
+  const g = window.debug.section().ghost;
   setTool('inspect');
-  return `${d.stage} ${d.axis}=${Math.round(d.offset)} keeping ${d.flipped ? '-' : '+'} caps=${d.capVisible}`;
+  return `${d.stage} ${d.axis}=${Math.round(d.offset)} keeping ${d.flipped ? '-' : '+'} caps=${d.capVisible} ghost=${g ? g.position.join(',') + '/' + g.scale.slice(0, 2).join('x') : 'none'}`;
 })();
 // The view cube: a click on its TOP face aims the camera straight down; a drag on it orbits.
 const cube = (() => {

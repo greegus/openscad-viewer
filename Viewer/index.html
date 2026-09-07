@@ -234,7 +234,7 @@ import { STLLoader } from './vendor/STLLoader.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { createMeasure } from './measure.js';
 import { createInspect } from './inspect.js';
-import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, cutBoxFromPolygons, triangulateConvex, sphereSilhouette, pieceSilhouette, clippedArea, clipToBox, contactPatches, makeClickDetector, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
+import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, cutBoxFromPolygons, triangulateConvex, sphereSilhouette, pieceSilhouette, clippedArea, clipToBox, contactPatches, makeClickDetector, cursorPx, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
 import { updateStrokeResolution } from './strokes.js';
 import { createGrid } from './grid.js';
 import { createPalette } from './palette.js';
@@ -1245,6 +1245,13 @@ makeClickDetector(renderer.domElement, (px) => {
   if (!hit) return;
   const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
   section.setFromHit(normal, hit.point, view.camera.getWorldDirection(new THREE.Vector3()));
+});
+// The ghost of the cut follows the pointer over the model while the tool is on.
+renderer.domElement.addEventListener('pointermove', (event) => {
+  if (tool !== 'section') return;
+  const hit = raycastParts(cursorPx(event, renderer.domElement));
+  if (!hit) { section.hideGhost(); return; }
+  section.showGhost(hit.face.normal.clone().transformDirection(hit.object.matrixWorld), hit.point);
 });
 const palette = createPalette({ actions: paletteActions });
 

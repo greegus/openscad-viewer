@@ -36,6 +36,19 @@ export function createSection({ scene, renderer, view, readout }) {
   let targets = [];        // { mesh, xray, colour }
   let overlays = [];       // the edge overlay and the silhouettes, one object each
 
+  // The ghost: where the cut would go from the face under the pointer — a translucent sheet the
+  // size of the whole model in that plane, with its outline — so a click is not a guess.
+  const ghost = new THREE.Group();
+  ghost.visible = false;
+  const ghostFill = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({ color: 0x0a84ff, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }));
+  const ghostEdge = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(1, 1)),
+    new THREE.LineBasicMaterial({ color: 0x0a84ff, transparent: true, opacity: 0.8, depthTest: false }));
+  ghostFill.renderOrder = 18;
+  ghostEdge.renderOrder = 19;
+  ghost.add(ghostFill, ghostEdge);
+  scene.add(ghost);
+
   /// Stencil pair per material: back faces add, front faces subtract. What remains set is
   /// solid where the plane cuts, and the cap quad is painted through that mask.
   function buildCaps() {
@@ -177,6 +190,31 @@ export function createSection({ scene, renderer, view, readout }) {
       updatePlane();
     },
 
+    /// Shows the ghost for a face under the pointer: the plane of the cut a click there would
+    /// make, sized to the model's extent in that plane. Null hides it.
+    showGhost(worldNormal, worldPoint) {
+      if (!worldNormal || !state.bounds) { ghost.visible = false; return; }
+      const n = worldToModelVector(worldNormal);
+      const axis = ['x', 'y', 'z'].reduce((best, k) => Math.abs(n[k]) > Math.abs(n[best]) ? k : best, 'x');
+      const p = worldToModelVector(worldPoint);
+      const [u, v] = ['x', 'y', 'z'].filter((k) => k !== axis);
+      const b = state.bounds;
+      const centre = { x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2, z: (b.min.z + b.max.z) / 2 };
+      centre[axis] = p[axis];
+      // A little larger than the model, so the sheet shows past its edges.
+      const size = { [u]: (b.max[u] - b.min[u]) * 1.06, [v]: (b.max[v] - b.min[v]) * 1.06 };
+      // The sheet's own x and y run along the two other model axes, its z along the cut's axis:
+      // a basis built from those, placed in the world like everything else.
+      const unit = (k) => modelVector([k === 'x' ? 1 : 0, k === 'y' ? 1 : 0, k === 'z' ? 1 : 0]);
+      ghost.matrixAutoUpdate = false;
+      // A point, not a direction: modelVector() normalises, being for directions.
+      ghost.matrix.makeBasis(unit(u), unit(v), unit(axis)).setPosition(new THREE.Vector3(centre.x, centre.y, centre.z).applyMatrix4(MODEL_TO_WORLD));
+      ghostFill.scale.set(size[u], size[v], 1);
+      ghostEdge.scale.copy(ghostFill.scale);
+      ghost.visible = true;
+    },
+    hideGhost() { ghost.visible = false; },
+
     /// Cuts at the face clicked: the plane through the hit point, along the model axis nearest
     /// the face's normal — every cut worth making in furniture is axis-aligned — with the half
     /// toward the camera removed, since the point of a section is to look inside.
@@ -204,12 +242,14 @@ export function createSection({ scene, renderer, view, readout }) {
       state.stage = 'off';
       state.axis = null;
       state.flipped = false;
+      ghost.visible = false;
       updatePlane();
     },
 
     get stage() { return state.stage; },
     get debug() {
-      return { ...state, capChildren: capGroup.children.length, capVisible: capGroup.visible };
+      return { ...state, capChildren: capGroup.children.length, capVisible: capGroup.visible,
+               ghost: ghost.visible ? { position: new THREE.Vector3().setFromMatrixPosition(ghost.matrix).toArray().map(Math.round), scale: ghostFill.scale.toArray().map(Math.round) } : null };
     },
   };
 }
