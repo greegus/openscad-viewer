@@ -35,6 +35,8 @@ expect "measure board top to cube top"    "$(echo "$out" | field "['measured']['
 expect "measure corner to corner"          "$(echo "$out" | field "['measured']['vertices']")" "Vertex to vertex · distance 102.0 mm"
 expect "measure rim centre to rim centre"  "$(echo "$out" | field "['measured']['centres']")" "Centre to centre · distance 80.6 mm"
 expect "measure corner to face"            "$(echo "$out" | field "['measured']['vertexFace']")" "Vertex to face · distance 25.0 mm"
+expect "axis dots on the cube's dimensions" "$(echo "$out" | field "['dots']['piece']")" "Width × depth × height [x]40 × [y]40 × [z]40 mm Volume 0.06 dm³ Corner 0, 0, 0"
+expect "the cube's top faces Z, in the model's axes" "$(echo "$out" | field "['dots']['face']")" "Size [x]40 × [y]40 mm Area 16.0 cm² Facing Z"
 
 echo "Tests/flush.scad"
 out=$(Tests/probe.sh Tests/flush.scad Tests/probes/flush.js) || { echo "  probe failed: $out"; exit 1; }

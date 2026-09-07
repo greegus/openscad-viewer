@@ -316,7 +316,11 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
   holding **Command** gives the whole part. Not Ctrl as well: on macOS Ctrl-click is a
   synthesised secondary click and would collide with the context menu.
   - An edge reports length and the axis it runs along; a face reports its in-plane size, area
-    and facing; a part reports `w × d × h`, volume, model-space corner and an **id**.
+    and facing; a part reports `w × d × h`, volume, model-space corner and an **id**. Every
+    dimension carries a dot in the colour of the model axis it lies along (the grid's red, green
+    and blue), so a board the design has turned — or one from a STEP file — reads as
+    `[y]565 × [z]1415 × [x]15` rather than leaving you to guess which 15 is the thickness. Axes
+    are the model's throughout: a Z-up design's top faces Z, whatever the scene calls up.
   - A "face" is not a triangle. The mesh is a triangle soup, so faces are reconstructed once
     per part by welding triangles that share an edge and lie in the same plane — otherwise
     clicking a panel would select half a rectangle.

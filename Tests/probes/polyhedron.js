@@ -39,7 +39,22 @@ const measured = (() => {
   setTool('inspect');
   return { faces, vertices, centres, vertexFace };
 })();
+// The panel's dimensions carry an axis dot per number, in the model's axes; a face says which
+// axis it faces in the same terms (the cube's top faces Z, not the scene's Y).
+const dots = (() => {
+  setTool('inspect'); setView('3d'); window.debug.snapshot();
+  const canvas = document.querySelector('canvas');
+  const rect = canvas.getBoundingClientRect();
+  const hover = (m, meta) => {
+    const px = window.debug.worldToScreen([m[0], m[2], -m[1]]);
+    canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: rect.left + px[0], clientY: rect.top + px[1], metaKey: meta, bubbles: true, pointerId: 1 }));
+    window.debug.snapshot();
+    return [...document.querySelectorAll('.readout-table span')].map((s) => s.innerHTML.replace(/<span class="axis-dot axis-(.)"><\/span>/g, '[$1]')).filter(Boolean).join(' ');
+  };
+  return { piece: hover([20, 20, 40], true), face: hover([20, 20, 40], false) };
+})();
 return {
+  dots,
   revolvedCoverage: cov.slice(4).map((r) => `${r.faces}/${r.inside}`),
   cone: { faces: faces(5), rimSegments: rims(5), silhouetteLines: sil(5) },
   frustum: { faces: faces(6), rimSegments: rims(6), silhouetteLines: sil(6) },
