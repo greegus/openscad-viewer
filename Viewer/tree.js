@@ -9,6 +9,11 @@
 const EYE = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
   stroke-width="1.3"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z"/>
   <circle cx="8" cy="8" r="1.9"/></svg>`;
+/// A chevron, pointing down when open and right when folded — an arrow, not a dot-sized
+/// triangle glyph, so it reads as a control at the list's size.
+const CHEVRON = `<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor"
+  stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.5 10.5 8 5 12.5" /></svg>`;
+
 const EYE_OFF = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
   stroke-width="1.3"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z"/>
   <circle cx="8" cy="8" r="1.9"/><path d="M2.5 13.5 13.5 2.5"/></svg>`;
@@ -97,7 +102,7 @@ export function createTree({ container, onToggle, isHidden, label, onHover, onSe
 
     const header = document.createElement('button');
     header.className = 'tree-header';
-    header.innerHTML = `<span class="tree-caret">${panelOpen ? '▾' : '▸'}</span>
+    header.innerHTML = `<span class="tree-caret${panelOpen ? ' is-open' : ''}">${CHEVRON}</span>
                         <span>Parts</span>`;
     header.addEventListener('click', () => { panelOpen = !panelOpen; render(); });
     container.appendChild(header);
@@ -167,7 +172,7 @@ export function createTree({ container, onToggle, isHidden, label, onHover, onSe
     const row = document.createElement('div');
     row.className = 'tree-row is-group';
     row.style.paddingLeft = `${6 + depth * 12}px`;
-    row.innerHTML = `<button class="tree-caret">${isCollapsed ? '▸' : '▾'}</button>
+    row.innerHTML = `<button class="tree-caret${isCollapsed ? '' : ' is-open'}">${CHEVRON}</button>
                      <span class="tree-id">G${index}</span>
                      <span class="tree-name"></span>
                      <button class="tree-eye"></button>`;

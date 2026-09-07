@@ -112,8 +112,11 @@
   .tree-name { flex: 1; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tree-caret {
     appearance: none; border: 0; background: transparent; cursor: pointer;
-    width: 14px; padding: 0; color: rgba(255, 255, 255, 0.45); font-size: 9px;
+    width: 14px; padding: 0; color: rgba(255, 255, 255, 0.55);
+    display: inline-flex; align-items: center; justify-content: center;
   }
+  .tree-caret svg { transition: transform 120ms ease; }
+  .tree-caret.is-open svg { transform: rotate(90deg); }
   /* Always present, so a row does not shift when the pointer arrives. */
   .tree-eye {
     appearance: none; border: 0; background: transparent; cursor: pointer;
