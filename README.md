@@ -630,7 +630,8 @@ swaps the kept side, and one on its other side shows the cut-away half as a **gh
 x-ray meshes, clipped the other way, over the solid view; off again, the display mode decides
 what the x-ray meshes do — and fainter than the x-ray view proper, a reminder of what was cut
 rather than a second model to read. Clicking another face cuts there instead. Arrow keys move the plane 1 mm, Shift 10 mm,
-Tab flips the kept side. **Escape** takes the cut back and leaves the tool on, ready for the
+Tab flips the kept side. Both buttons sit neutral grey — blue says a toggle is on, and
+swapping the kept side is an action, not a state, so only the ghost lights up. **Escape** takes the cut back and leaves the tool on, ready for the
 next face; a second Escape leaves the tool. `Cut along X/Y/Z` from the palette starts in the middle
 of the model, because a plane at the edge cuts nothing and looks broken. The cut takes the edge
 overlay and the silhouettes with it, so no line hangs in the cut.

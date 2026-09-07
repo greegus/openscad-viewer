@@ -167,19 +167,19 @@
   }
   .pill button:hover { background: rgba(255, 255, 255, 0.08); }
   .pill button.is-on { background: #0a84ff; color: white; }
-  /* The section's flip button, floating beside the handle on the cut plane. */
+  /* The section's buttons, floating beside the handle on the cut plane. Both sit neutral:
+     blue means a toggle is on, and flipping the kept side is an action, not a state. */
   .section-flip {
     position: absolute; width: 28px; height: 28px; padding: 0; transform: translate(0, 0);
     display: grid; place-items: center; appearance: none; border: 0; border-radius: 8px;
-    color: white; background: rgba(10, 132, 255, 0.9); cursor: pointer;
+    color: white; background: rgba(60, 64, 72, 0.9); cursor: pointer;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   }
-  .section-flip:hover { background: rgba(50, 160, 255, 0.95); }
+  .section-flip:hover { background: rgba(90, 95, 105, 0.95); }
   .section-flip svg { width: 15px; height: 15px; display: block; }
   .section-flip[hidden] { display: none; }
-  .section-ghost { background: rgba(60, 64, 72, 0.9); }
-  .section-ghost:hover { background: rgba(90, 95, 105, 0.95); }
-  .section-ghost.is-on { background: rgba(10, 132, 255, 0.9); }
+  .section-flip.is-on { background: rgba(10, 132, 255, 0.9); }
+  .section-flip.is-on:hover { background: rgba(50, 160, 255, 0.95); }
   /* Home, left of the view cube: back to the framing the file opened with. */
   #home {
     position: absolute; top: 12px; right: 138px;      /* cube is 118 wide at 12 from the edge */
