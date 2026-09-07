@@ -241,6 +241,10 @@ export function createSection({ scene, renderer, view, readout, onRestore }) {
       target.mesh.material.clippingPlanes = active ? [plane] : [];
       target.mesh.material.needsUpdate = true;
       target.xray.material.clippingPlanes = ghostHalf ? [planeBack] : active ? [plane] : [];
+      // Fainter than the x-ray view proper: the ghost is a reminder of what was cut, not a
+      // second model to read.
+      target.xrayOpacity ??= target.xray.material.opacity;
+      target.xray.material.opacity = ghostHalf ? target.xrayOpacity * 0.45 : target.xrayOpacity;
       target.xray.material.needsUpdate = true;
       if (ghostHalf) target.xray.visible = true;
     }
@@ -380,17 +384,54 @@ export function createSection({ scene, renderer, view, readout, onRestore }) {
       updatePlane();
     },
 
-    start() { state.stage = 'plane'; report(); },
+    /// The tool comes on: with a cut already there, straight back to its handles.
+    start() {
+      if (state.axis) { state.stage = 'ready'; updatePlane(); }
+      else { state.stage = 'plane'; report(); }
+    },
+
+    /// The tool goes off but the cut stays: handles and ghost away, planes kept.
+    pause() {
+      ghost.visible = false;
+      gizmo.visible = false;
+      flipButton.hidden = true;
+      ghostButton.hidden = true;
+    },
+
+    /// The cut is taken back while the tool stays on — back to "click a face".
+    cancel() {
+      state.axis = null;
+      state.flipped = false;
+      state.ghostHalf = false;
+      state.stage = 'plane';
+      ghost.visible = false;
+      updatePlane();
+    },
 
     stop() {
       state.stage = 'off';
       state.axis = null;
       state.flipped = false;
+      state.ghostHalf = false;
       ghost.visible = false;
       updatePlane();
     },
 
     update,
+    /// Whether a world point is on the kept side of a live cut (or there is no cut).
+    keeps(point) {
+      const active = !!state.axis && (state.stage === 'ready' || state.stage === 'side');
+      return !active || plane.distanceToPoint(point) >= -0.01;
+    },
+
+    /// Where a ray meets the cut plane, for a cap hit; null without a live cut or when the ray
+    /// runs past the plane.
+    capAlong(ray) {
+      const active = !!state.axis && (state.stage === 'ready' || state.stage === 'side');
+      if (!active) return null;
+      const point = ray.intersectPlane(plane, new THREE.Vector3());
+      return point ? { point, distance: ray.origin.distanceTo(point) } : null;
+    },
     get stage() { return state.stage; },
     get debug() {
       return { ...state, capChildren: capGroup.children.length, capVisible: capGroup.visible,

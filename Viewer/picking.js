@@ -63,12 +63,34 @@ export function buildEdgeList(targets) {
 
 /// Is `point` the first thing the camera meets along its own line of sight?
 /// The point sits exactly on a surface, so the tolerance only has to absorb rounding.
+/// Whether a world point is there to be interacted with. The section tool sets this: what it
+/// has cut away is not drawn, and must not be hovered, selected, measured or snapped to either,
+/// nor hide what lies behind it.
+let pointFilter = () => true;
+let capAlong = () => null;
+export function setPointFilter(fn, cap) { pointFilter = fn ?? (() => true); capAlong = cap ?? (() => null); }
+export const isKept = (point) => pointFilter(point);
+/// The first of a raycaster's hits on a point that is kept. Given the ray as well, a hit
+/// reached from inside the material — the first kept surface facing away — is turned into a
+/// hit on the section's cap (`cap: true`, the point on the cut plane): the ray came in through
+/// what the cut removed, and the cap is what shows there. The face and its index stay, for
+/// the piece the cap belongs to.
+export function firstKept(hits, ray = null) {
+  const hit = hits.find((h) => pointFilter(h.point)) ?? null;
+  if (!hit || !ray || !hit.face) return hit;
+  const outward = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+  if (outward.dot(ray.direction) <= 0) return hit;
+  const cap = capAlong(ray);
+  if (!cap || cap.distance >= hit.distance) return hit;
+  return { ...hit, point: cap.point, distance: cap.distance, cap: true };
+}
+
 function isVisible(point, camera, canvas, raycaster, occluders, tolerance = 2) {
   const s = toScreen(point, camera, canvas);
   const r = canvas.getBoundingClientRect();
   raycaster.setFromCamera(
     new THREE.Vector2((s.x / r.width) * 2 - 1, -(s.y / r.height) * 2 + 1), camera);
-  const hit = raycaster.intersectObjects(occluders, false)[0];
+  const hit = firstKept(raycaster.intersectObjects(occluders, false), raycaster.ray);
   if (!hit) return true;
   // Depth along the ray, not distance from the camera position: under an orthographic
   // camera the ray starts on the near plane, so the two are not the same thing.
@@ -2257,7 +2279,7 @@ export function vertexUnderCursor(px, features, camera, canvas, threshold = 6, o
       if (seen.has(key)) continue;
       seen.add(key);
       const d = toScreen(v, camera, canvas).distanceTo(px);
-      if (d < threshold) candidates.push({ distance: d, point: v.clone() });
+      if (d < threshold && pointFilter(v)) candidates.push({ distance: d, point: v.clone() });
     }
   }
   candidates.sort((x, y) => x.distance - y.distance);
@@ -2279,7 +2301,7 @@ export function featureUnderCursor(px, features, camera, canvas, threshold = 14,
       const { distance, t } = pointToSegment2D(px, a, b);
       if (!best || distance < best.distance) best = { distance, point: s.a.clone().lerp(s.b, t) };
     }
-    if (best && best.distance < threshold) candidates.push({ feature: f, ...best });
+    if (best && best.distance < threshold && pointFilter(best.point)) candidates.push({ feature: f, ...best });
   }
   candidates.sort((x, y) => x.distance - y.distance);
   if (!occluders?.length) return candidates[0]?.feature ?? null;

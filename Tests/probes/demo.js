@@ -26,9 +26,10 @@ const section = (() => {
   }
   window.debug.snapshot();
   const d = window.debug.section();
-  // The ghost: over the same shelf (away from the handle, which stands at its centre) the cut's
-  // sheet sits at its height, the model's size across.
-  const gp = window.debug.worldToScreen([150, 300, -100]);
+  // The ghost: aimed low at the model, the pointer meets the door's front (over the cap there
+  // is no ghost — the cap is the cut itself), so the sheet stands in the door's plane, the
+  // model's size across.
+  const gp = window.debug.worldToScreen([150, 18, -100]);
   canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: rect.left + gp[0], clientY: rect.top + gp[1], bubbles: true, pointerId: 1 }));
   window.debug.snapshot();
   const g = window.debug.section().ghost;
@@ -46,8 +47,21 @@ const section = (() => {
   const ghostHalf = window.debug.section().ghostHalf && window.debug.state().parts[0].xray === true;
   document.querySelector('.section-ghost').click();
   const restored = window.debug.state().parts[0].xray === false;
-  setTool('inspect');
-  return `${d.stage} ${d.axis}=${Math.round(d.offset)} keeping ${d.flipped ? '-' : '+'} caps=${d.capVisible} ghost=${g ? g.position.join(',') + '/' + g.scale.slice(0, 2).join('x') : 'none'} dragged=${dragged > d.offset} flipped=${flipped} ghostHalf=${ghostHalf}/${restored}`;
+  // The cut outlives the tool: in Inspect it is still there, and the cut-away half is out of
+  // reach — flipped, the kept side is above the plane, and hovering the bottom board's front
+  // finds nothing. Back in Section, Escape takes the cut back and keeps the tool; a second
+  // Escape leaves it.
+  const key = (k) => window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+  key('v');
+  const kept = window.debug.section().stage;
+  const tp = window.debug.worldToScreen([300, 9, 0]);
+  canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: rect.left + tp[0], clientY: rect.top + tp[1], bubbles: true, pointerId: 1 }));
+  window.debug.snapshot();
+  const overCutAway = window.debug.inspect().hoverPiece;
+  key('s');
+  key('Escape'); const afterEscape = `${window.debug.state().tool}/${window.debug.section().stage}`;
+  key('Escape'); const afterSecond = window.debug.state().tool;
+  return `${d.stage} ${d.axis}=${Math.round(d.offset)} keeping ${d.flipped ? '-' : '+'} caps=${d.capVisible} ghost=${g ? g.position.join(',') + '/' + g.scale.slice(0, 2).join('x') : 'none'} dragged=${dragged > d.offset} flipped=${flipped} ghostHalf=${ghostHalf}/${restored} inspect:${kept}/${overCutAway} esc:${afterEscape}/${afterSecond}`;
 })();
 // The view cube: a click on its TOP face aims the camera straight down; a drag on it orbits.
 const cube = (() => {

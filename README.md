@@ -303,7 +303,7 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
 - **Tools** — `Inspect`, `Measure`, `Section` — are a floating glass panel at the bottom centre of
   the view, in the page, so their state and their look stay with the tools themselves. Keys: **V** or **I**
   Inspect, **M** Measure, **H** home, **Shift+F/K/L/R/T/B** the front, back, left, right, top and
-  bottom views (turned to, like a cube click), **Shift+X** solid ↔ x-ray, **S** Section, **Escape** back to Inspect (in Inspect it clears the
+  bottom views (turned to, like a cube click), **Shift+X** solid ↔ x-ray, **S** Section, **Escape** a step back — a live cut, then the tool, to Inspect (in Inspect it clears the
   selection, as before); **P** folds the parts list to its header and opens it again. In the list the **arrows** walk a
   cursor — its row's pieces lit in the scene as a hover would — **Enter** selects a piece or folds
   a group, **Left** folds a group or goes from a piece to its group, **Right** unfolds; while a
@@ -628,10 +628,22 @@ Once cut, a two-headed arrow stands on the plane at the model's centre: dragging
 plane along its axis (the pointer's ray is matched against the axis line), a button beside it
 swaps the kept side, and one on its other side shows the cut-away half as a **ghost** — the
 x-ray meshes, clipped the other way, over the solid view; off again, the display mode decides
-what the x-ray meshes do. Clicking another face cuts there instead. Arrow keys move the plane 1 mm, Shift 10 mm,
-Tab flips the kept side, Escape stops. `Cut along X/Y/Z` from the palette starts in the middle
+what the x-ray meshes do — and fainter than the x-ray view proper, a reminder of what was cut
+rather than a second model to read. Clicking another face cuts there instead. Arrow keys move the plane 1 mm, Shift 10 mm,
+Tab flips the kept side. **Escape** takes the cut back and leaves the tool on, ready for the
+next face; a second Escape leaves the tool. `Cut along X/Y/Z` from the palette starts in the middle
 of the model, because a plane at the edge cuts nothing and looks broken. The cut takes the edge
-overlay and the silhouettes with it, so no line hangs in the cut. (The readout had promised
+overlay and the silhouettes with it, so no line hangs in the cut.
+
+The cut **outlives the tool**: switching to Inspect or Measure keeps it (the handles go, the
+planes stay) and coming back to Section finds the handles where they were; only turning the
+tool off — its button again, or `Stop the cross section` — removes it. What the cut took away
+is gone for every tool, not just for the eye: a face in the removed half neither lights up under
+the pointer nor takes a click, a vertex or edge there cannot be measured or snapped to, the
+ghost of a next cut does not appear over it, and it hides nothing behind it. The line of
+sight ends where it should, too: a ray that comes in through the removed half and meets the
+next surface from inside the material is looking at the **cap**, so that is what it hits —
+the piece for a double-click or the list, but no face to light up and nothing to cut at. (The readout had promised
 "click a face" and "drag" from the start; neither had been wired up — the tool only ever had
 its keys.)
 

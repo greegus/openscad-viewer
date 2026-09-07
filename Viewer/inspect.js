@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { toScreen, cursorPx, pointToSegment2D, pieceFeatures, featureUnderCursor, pieceSilhouette, contactPatches, worldToModelVector,
+import { toScreen, cursorPx, pointToSegment2D, pieceFeatures, featureUnderCursor, pieceSilhouette, contactPatches, worldToModelVector, firstKept,
          axisName, pieceFaces, assignTriangles, trianglesTouchingBox, trianglesInBox, clipToBox,
          MODEL_TO_WORLD } from './picking.js';
 import { createStroke } from './strokes.js';
@@ -184,7 +184,8 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     const r = canvas.getBoundingClientRect();
     raycaster.setFromCamera(
       new THREE.Vector2((px.x / r.width) * 2 - 1, -(px.y / r.height) * 2 + 1), view.camera);
-    return raycaster.intersectObjects(state.meshes, false)[0] ?? null;
+    // The first hit that is there: what a section has cut away neither responds nor hides.
+    return firstKept(raycaster.intersectObjects(state.meshes, false), raycaster.ray);
   }
 
   /// The smallest piece whose box contains the point — panels sit inside carcasses, so the
@@ -393,7 +394,9 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     if (feature) return { type: 'edge', feature, piece: feature.piece };
 
     const h = hit(px);
-    if (!h) return null;
+    // The cap of a cut has no face of its own to light up; the piece it belongs to is still
+    // there for a double-click or the list.
+    if (!h || h.cap) return null;
     const info = state.groups.get(h.object);
     if (!info) return null;
     const triangles = info.groups.get(info.find(h.faceIndex)) ?? [h.faceIndex];

@@ -254,7 +254,7 @@ import { STLLoader } from './vendor/STLLoader.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { createMeasure } from './measure.js';
 import { createInspect } from './inspect.js';
-import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, cutBoxFromPolygons, triangulateConvex, sphereSilhouette, pieceSilhouette, clippedArea, clipToBox, contactPatches, makeClickDetector, cursorPx, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
+import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, cutBoxFromPolygons, triangulateConvex, sphereSilhouette, pieceSilhouette, clippedArea, clipToBox, contactPatches, makeClickDetector, cursorPx, setPointFilter, firstKept, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
 import { updateStrokeResolution } from './strokes.js';
 import { createGrid } from './grid.js';
 import { createPalette } from './palette.js';
@@ -510,7 +510,7 @@ function raycastParts(px) {
   const rect = canvas.getBoundingClientRect();
   const ndc = new THREE.Vector2((px.x / rect.width) * 2 - 1, -(px.y / rect.height) * 2 + 1);
   pivotRay.setFromCamera(ndc, view.camera);
-  return pivotRay.intersectObjects(parts.filter((p) => p.mesh.visible).map((p) => p.mesh), false)[0] ?? null;
+  return firstKept(pivotRay.intersectObjects(parts.filter((p) => p.mesh.visible).map((p) => p.mesh), false), pivotRay.ray);
 }
 
 makeControls();
@@ -777,14 +777,17 @@ function setEdges(on) {
 
 /// Tools are mutually exclusive: 'none', 'inspect' or 'measure'.
 function setTool(name) {
+  const leavingSection = tool === 'section' && name !== 'section';
   tool = name;
   // Disable first: setEnabled(false) clears the readout, which would wipe the hint the
   // incoming tool has just written.
   inspect?.setEnabled(false);
   measure?.setEnabled(false);
-  // Stopping the section has to remove its clipping plane from every material. Left behind, it
-  // keeps cutting the model after the tool is off, which reads as missing geometry.
-  section?.stop();
+  // A cut outlives the tool: switching to Inspect or Measure keeps it (the handles go, the
+  // planes stay, and what is cut away is out of every tool's reach). Switching the tool off
+  // altogether — its button clicked again, or "Stop the cross section" — removes the cut, or
+  // it would keep cutting with nothing on screen to say so.
+  if (leavingSection) { if (name === 'none') section?.stop(); else section?.pause(); }
   if (name === 'inspect') inspect?.setEnabled(true);
   if (name === 'measure') measure?.setEnabled(true);
   if (name === 'section') section?.start();
@@ -1076,14 +1079,15 @@ window.addEventListener('keydown', (event) => {
   // The parts list has the arrows and Enter, unless a section is live — there the arrows move
   // the plane. Escape first takes the list's cursor away, then leaves a tool for Inspect.
   else if (['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(event.key)) {
-    if (section.stage !== 'off' && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) return;
+    if (tool === 'section' && section.stage !== 'off' && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) return;
     if (tree.key(event)) event.preventDefault();
   }
   else if (event.key === 'Escape') {
     // A step back: the list's cursor first, then a measurement in progress (Measure clears it
-    // itself), and only then does the tool give way to Inspect.
+    // itself) or a live cut, and only then does the tool give way to Inspect.
     if (tree.key(event)) { event.preventDefault(); return; }
     if (tool === 'measure' && measure?.hasPicks) return;
+    if (tool === 'section' && section.stage !== 'plane') { section.cancel(); event.preventDefault(); return; }
     if (tool !== 'inspect') { setTool('inspect'); event.preventDefault(); }
   }
 });
@@ -1219,7 +1223,7 @@ function paletteActions() {
   add('Tool', tool === 'measure' ? 'Stop measuring' : 'Measure',
       () => setTool(tool === 'measure' ? 'none' : 'measure'), 'M');
   add('Tool', tool === 'section' ? 'Stop the cross section' : 'Cross section',
-      () => setTool(tool === 'section' ? 'none' : 'section'), 'S');
+      () => { if (tool === 'section') { section.stop(); setTool('inspect'); } else setTool('section'); }, 'S');
   for (const axis of ['X', 'Y', 'Z']) {
     list.push({ group: 'Section', title: `Cut along ${axis}`,
                 run: () => { setTool('section'); section.setAxis(axis.toLowerCase()); },
@@ -1253,10 +1257,12 @@ let section = createSection({
   readout: (text) => { readoutEl.textContent = text; },
   onRestore: () => setMode(mode),       // the ghost of the cut-away half borrowed the x-ray meshes
 });
+// What the section cuts away is out of reach for every tool.
+setPointFilter((p) => section.keeps(p), (ray) => section.capAlong(ray));
 
 /// Section keyboard: the plane keeps moving until you switch the tool off.
 window.addEventListener('keydown', (event) => {
-  if (section.stage === 'off' || palette?.isOpen) return;
+  if (tool !== 'section' || section.stage === 'off' || palette?.isOpen) return;   // a paused cut leaves the arrows to the list
   const step = event.shiftKey ? 10 : 1;
   if (event.key === 'ArrowUp') { section.move(step); event.preventDefault(); }
   else if (event.key === 'ArrowDown') { section.move(-step); event.preventDefault(); }
@@ -1271,7 +1277,8 @@ window.section = section;   // for the palette and for tests
 makeClickDetector(renderer.domElement, (px) => {
   if (tool !== 'section') return;
   const hit = raycastParts(px);
-  if (!hit) return;
+  // The cap is the cut itself, not a face to cut at.
+  if (!hit || hit.cap) return;
   const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
   section.setFromHit(normal, hit.point, view.camera.getWorldDirection(new THREE.Vector3()));
 });
@@ -1279,7 +1286,7 @@ makeClickDetector(renderer.domElement, (px) => {
 renderer.domElement.addEventListener('pointermove', (event) => {
   if (tool !== 'section') return;
   const hit = raycastParts(cursorPx(event, renderer.domElement));
-  if (!hit) { section.hideGhost(); return; }
+  if (!hit || hit.cap) { section.hideGhost(); return; }
   section.showGhost(hit.face.normal.clone().transformDirection(hit.object.matrixWorld), hit.point);
 });
 const palette = createPalette({ actions: paletteActions });
