@@ -46,9 +46,26 @@ const cube = (() => {
   const afterDrag = window.debug.state().activeView;
   // Home: the framing the file opened with, from wherever the camera was.
   document.getElementById('home').click();
-  window.debug.snapshot();
+  window.debug.settleCamera(); window.debug.snapshot();
   const home = window.debug.cameraDirection().join(',');
   return { topRegion, afterClick, afterDrag, home };
+})();
+// The display and projection pills under the cube follow the state and drive it; home is
+// animated and lands on the framing the file opened with, from any mode and projection.
+const pills = (() => {
+  const lit = (sel) => [...document.querySelectorAll(sel + ' button.is-on')].map((b) => b.dataset.mode ?? b.dataset.projection).join(',');
+  const start = `${lit('#mode-pill')} ${lit('#projection-pill')}`;
+  document.querySelector('#mode-pill button[data-mode="xray"]').click();
+  document.querySelector('#projection-pill button[data-projection="perspective"]').click();
+  const switched = `${lit('#mode-pill')} ${lit('#projection-pill')} ${window.debug.state().mode} ${window.debug.state().projection}`;
+  setView('top'); window.debug.snapshot();
+  document.getElementById('home').click();
+  const animating = window.debug.state().tweening;
+  window.debug.settleCamera(); window.debug.snapshot();
+  const home = window.debug.cameraDirection().join(',');
+  document.querySelector('#mode-pill button[data-mode="normal"]').click();
+  document.querySelector('#projection-pill button[data-projection="isometric"]').click();
+  return { start, switched, animating, home };
 })();
 const c = window.debug.components();
 const cov = window.debug.pieceCoverage();
@@ -58,6 +75,7 @@ return {
   pitch,
   section,
   cube,
+  pills,
   // The left side's inner face is whole although two shelves rest on it: the mesh has holes
   // there, the face has patches: 2 shelves × 18 × 360 and the bottom × 18 × 400.
   shelfPatches: (window.debug.patches(1) || []).filter((p) => p.normal[0] === 1).reduce((n, p) => n + p.area, 0),

@@ -67,26 +67,11 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
     /// Read with: log show --last 5m --predicate 'subsystem == "com.greegus.OpenSCADViewer"'
     private static let log = Logger(subsystem: "com.greegus.OpenSCADViewer", category: "preview")
 
-    /// Camera projection. Isometric is orthographic: parallel edges stay parallel, so
-    /// thicknesses can be compared across the model without foreshortening.
-    private static let projections: [(title: String, id: String)] = [
-        ("Persp", "perspective"),
-        ("Iso", "isometric"),
-    ]
 
     /// Standard viewing directions.
 
-    /// 3D display modes. Adding another (wireframe, section) is one line here and in index.html.
-    private static let modes: [(title: String, id: String)] = [
-        ("Solid", "normal"),
-        ("X-ray", "xray"),
-    ]
 
     private let webView = ScadWebView(frame: .zero)
-    private var modePicker: NSSegmentedControl!
-    private var controlRow: NSStackView!
-    private var projectionPicker: NSSegmentedControl!
-    private var edgesToggle: NSButton!
     private let spinner = NSProgressIndicator()
     private let message = NSTextField(labelWithString: "")
     private var fileURL: URL?
@@ -103,24 +88,6 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
             webView.setContentHuggingPriority(.defaultLow, for: axis)
         }
 
-        // Display mode.
-        modePicker = NSSegmentedControl(labels: Self.modes.map(\.title), trackingMode: .selectOne,
-                                        target: self, action: #selector(changeDisplayMode))
-        modePicker.selectedSegment = 0
-        modePicker.translatesAutoresizingMaskIntoConstraints = false
-
-        projectionPicker = NSSegmentedControl(labels: Self.projections.map(\.title),
-                                              trackingMode: .selectOne,
-                                              target: self, action: #selector(changeProjection))
-        projectionPicker.selectedSegment = 1      // isometric by default
-
-        projectionPicker.translatesAutoresizingMaskIntoConstraints = false
-
-        edgesToggle = NSButton(checkboxWithTitle: "Edges", target: self, action: #selector(toggleEdges))
-        edgesToggle.state = .on          // matches the viewer's default
-        edgesToggle.translatesAutoresizingMaskIntoConstraints = false
-
-
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
@@ -135,14 +102,6 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
         // the left edge when it does not, rather than being cut off on both sides.
         // The tools (Inspect, Measure, Section) live in the page, as a floating panel at the
         // bottom of the view, so their state and their look stay with the tools themselves.
-        // The standard views are the view cube's, in the page; the row keeps mode, projection
-        // and edges.
-        controlRow = NSStackView(views: [modePicker, projectionPicker, edgesToggle])
-        controlRow.orientation = .horizontal
-        controlRow.alignment = .centerY
-        controlRow.spacing = 10
-        controlRow.translatesAutoresizingMaskIntoConstraints = false
-
         // The viewer tells us when the camera has been rotated off a preset direction.
         webView.onMessage = { [weak self] text in
             guard let self else { return }
@@ -153,27 +112,16 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
         }
         webView.setHostActions(hostActions)
 
-        let subviews: [NSView] = [webView, controlRow, spinner, message]
+        // Every control lives in the page now — the tools at the bottom, display, projection and
+        // the view cube at the top right — so the web view fills the whole panel.
+        let subviews: [NSView] = [webView, spinner, message]
         for v in subviews { root.addSubview(v) }
-
-        // Centred, but never past the left edge. The left clamp is required and the right one
-        // optional, so a row too wide for the panel gives way on the right — where the tools
-        // matter least — instead of hiding the mode picker off-screen on the left.
-        let centred = controlRow.centerXAnchor.constraint(equalTo: root.centerXAnchor)
-        centred.priority = .defaultHigh
-        let rightEdge = controlRow.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor,
-                                                            constant: -8)
-        rightEdge.priority = .defaultLow
 
         NSLayoutConstraint.activate([
             webView.topAnchor.constraint(equalTo: root.topAnchor, constant: 8),
             webView.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 8),
             webView.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
-            webView.bottomAnchor.constraint(equalTo: controlRow.topAnchor, constant: -8),
-            controlRow.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -12),
-            controlRow.leadingAnchor.constraint(greaterThanOrEqualTo: root.leadingAnchor, constant: 8),
-            centred,
-            rightEdge,
+            webView.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -8),
             spinner.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             spinner.centerYAnchor.constraint(equalTo: root.centerYAnchor),
             message.centerXAnchor.constraint(equalTo: root.centerXAnchor),
@@ -197,7 +145,7 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
     public override func viewDidLayout() {
         super.viewDidLayout()
         // Make the area Quick Look actually gave us visible in the log.
-        Self.log.info("layout: view \(NSStringFromRect(self.view.bounds), privacy: .public) host \(NSStringFromRect(self.view.superview?.bounds ?? .zero), privacy: .public) controls \(NSStringFromRect(self.controlRow.frame), privacy: .public)")
+        Self.log.info("layout: view \(NSStringFromRect(self.view.bounds), privacy: .public) host \(NSStringFromRect(self.view.superview?.bounds ?? .zero), privacy: .public)")
     }
 
     // MARK: - QLPreviewingController
@@ -210,23 +158,10 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
         loadMesh()
     }
 
-    @objc private func toggleEdges() {
-        webView.setEdges(edgesToggle.state == .on)
-    }
-
-    @objc private func changeProjection() {
-        webView.setProjection(Self.projections[projectionPicker.selectedSegment].id)
-    }
-
-    @objc private func changeDisplayMode() {
-        webView.setMode(Self.modes[modePicker.selectedSegment].id)
-    }
-
     /// The interactive view needs a real mesh, i.e. a full CGAL render (seconds, not milliseconds).
     private func loadMesh() {
         guard let url = fileURL else { return }
         message.isHidden = true
-        webView.setMode(Self.modes[max(modePicker.selectedSegment, 0)].id)
 
         if meshLoaded { return }
         guard let provider = geometryProvider else {

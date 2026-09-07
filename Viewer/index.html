@@ -137,6 +137,27 @@
   }
   /* Nothing to say, nothing to draw — otherwise an empty pill floats there. */
   #readout:empty { display: none; }
+  /* Under the view cube: display (solid / x-ray) and projection, one glass pill each. */
+  #view-controls {
+    position: absolute; top: 142px; right: 12px; width: 118px;   /* under the 118 px cube */
+    display: flex; flex-direction: column; gap: 6px;
+    font: 11px -apple-system, system-ui, sans-serif;
+  }
+  .pill {
+    display: flex; gap: 2px; padding: 3px;
+    border-radius: 9px; background: rgba(18, 20, 24, 0.62);
+    backdrop-filter: blur(16px) saturate(1.4);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.12);
+  }
+  .pill button {
+    flex: 1; appearance: none; border: 0; cursor: default; border-radius: 6px;
+    padding: 4px 0; display: grid; place-items: center;
+    color: rgba(255, 255, 255, 0.8); background: transparent; font: inherit; font-weight: 500;
+  }
+  .pill button:hover { background: rgba(255, 255, 255, 0.08); }
+  .pill button.is-on { background: #0a84ff; color: white; }
+  .pill button svg { width: 18px; height: 18px; display: block; fill: currentColor; }
   /* Home, left of the view cube: back to the framing the file opened with. */
   #home {
     position: absolute; top: 12px; right: 138px;      /* cube is 118 wide at 12 from the edge */
@@ -177,6 +198,20 @@
     <path d="M2.5 8.2 8 3.2l5.5 5" /><path d="M4 7.6V13h8V7.6" /><path d="M6.8 13V9.8h2.4V13" />
   </svg>
 </button>
+<div id="view-controls">
+  <div class="pill" id="mode-pill">
+    <button data-mode="normal" title="Solid">
+      <svg viewBox="0 0 120 120"><path fill-rule="evenodd" clip-rule="evenodd" d="M69.8746 11.3795C70.3194 11.3143 70.7743 11.3727 71.189 11.5491L108.503 27.4161C109.349 27.7758 109.909 28.5708 109.986 29.4613C109.995 29.5506 110 29.6409 110 29.7317L109.877 95.6302C109.875 96.8107 109.031 97.822 107.87 98.036L51.2867 108.465C50.7211 108.695 50.0851 108.708 49.5044 108.491C49.3903 108.454 49.2791 108.408 49.1713 108.355L11.4984 92.4641C10.5904 92.081 10.0001 91.1913 10.0001 90.2059V24.5686C10.0001 24.1563 10.1041 23.7577 10.2941 23.4054C10.6225 22.7012 11.2755 22.1771 12.0712 22.0304L69.7861 11.3943L69.8746 11.3795ZM85.2705 36.2375L52.8935 42.1601L52.8121 71.2254V103.199L104.979 93.5842L105.093 32.6609L85.2705 36.2375ZM14.9018 88.5795L47.8226 102.466L47.9103 71.3111V41.9638L14.9018 28.2414V88.5795ZM21.1053 25.3497L50.4829 37.534L84.2493 31.441L99.0684 28.7305L69.9492 16.3483L21.1053 25.3497Z"/></svg>
+    </button>
+    <button data-mode="xray" title="X-ray">
+      <svg viewBox="0 0 120 120"><path d="M72.9602 78.2171L101.716 90.5322L101.715 90.8629L93.5502 92.3676L70.6744 82.5704C70.6198 82.574 70.5647 82.5768 70.5093 82.5768C70.1367 82.5768 69.7839 82.4929 69.4677 82.3442L56.0799 84.7891V79.8068L68.0584 77.6191V42.7083L72.9602 41.8115V78.2171Z"/><path d="M44.5985 86.8862L26.9417 90.1114L18.6978 86.6341L44.6125 81.901L44.5985 86.8862Z"/><path d="M72.9602 21.1796V30.1574L68.0584 31.0418V20.0195L69.5746 19.7403L72.9602 21.1796Z"/><path fill-rule="evenodd" clip-rule="evenodd" d="M69.8746 11.3796C70.3194 11.3144 70.7742 11.3728 71.189 11.5491L108.503 27.4161C109.349 27.7758 109.909 28.5709 109.986 29.4613C109.995 29.5507 110 29.6409 110 29.7318L109.877 95.6303C109.874 96.8107 109.031 97.8221 107.87 98.0361L51.2866 108.465C50.7211 108.696 50.085 108.708 49.5043 108.491C49.3903 108.454 49.2791 108.408 49.1712 108.355L11.4983 92.4641C10.5903 92.0811 10 91.1914 10 90.2059V24.5687C10 24.1563 10.104 23.7578 10.294 23.4055C10.6224 22.7012 11.2755 22.1771 12.0711 22.0304L69.786 11.3943L69.8746 11.3796ZM85.2705 36.2376L52.8934 42.1602L52.8121 71.2254V103.199L104.979 93.5843L105.093 32.661L85.2705 36.2376ZM14.9018 88.5796L47.8225 102.466L47.9103 71.3112V41.9639L14.9018 28.2415V88.5796ZM21.1052 25.3498L50.4828 37.534L84.2493 31.4411L99.0683 28.7305L69.9492 16.3484L21.1052 25.3498Z"/></svg>
+    </button>
+  </div>
+  <div class="pill" id="projection-pill">
+    <button data-projection="perspective" title="Perspective">Persp</button>
+    <button data-projection="isometric" title="Orthographic">Ortho</button>
+  </div>
+</div>
 <div id="tools">
   <button class="tool-btn" data-tool="inspect">Inspect</button>
   <button class="tool-btn" data-tool="measure">Measure</button>
@@ -455,6 +490,7 @@ function setProjection(kind) {
   const to = kind === 'isometric' ? orthographic : perspective;
   const from = view.camera;
   projection = kind;
+  for (const b of document.querySelectorAll('#projection-pill button')) b.classList.toggle('is-on', b.dataset.projection === kind);
   if (to === from) return;
 
   const direction = from.position.clone().sub(controls.target).normalize();
@@ -683,8 +719,13 @@ function setMode(name) {
   }
   inspect?.setOcclusion(name === 'normal');
   measure?.setOcclusion(name === 'normal');
+  for (const b of document.querySelectorAll('#mode-pill button')) b.classList.toggle('is-on', b.dataset.mode === name);
   window.webkit?.messageHandlers?.viewer?.postMessage('mode: ' + name);
 }
+for (const b of document.querySelectorAll('#mode-pill button')) b.addEventListener('click', () => setMode(b.dataset.mode));
+for (const b of document.querySelectorAll('#projection-pill button')) b.addEventListener('click', () => setProjection(b.dataset.projection));
+// The pills show the starting state too, not only changes.
+for (const b of document.querySelectorAll('#projection-pill button')) b.classList.toggle('is-on', b.dataset.projection === projection);
 
 // Edges are independent of the mode — useful both as a CAD-style overlay on the
 // solid view and for reading structure in x-ray.
@@ -1156,9 +1197,43 @@ window.addEventListener('keydown', (event) => {
 /// The home view: the whole model framed from the front-right-above, as the file opened — the
 /// camera only; the model, the hidden pieces and the tools stay as they are.
 function homeView() {
-  cameraTween = null;
-  fit();
-  if (activeView) { activeView = null; window.webkit?.messageHandlers?.viewer?.postMessage('view: none'); }
+  // The framing fit() would choose, reached the way the cube turns the camera: direction, up,
+  // distance and target all eased over a quarter of a second, and an orthographic camera's
+  // zoom with them.
+  const box = new THREE.Box3();
+  for (const p of parts) box.expandByObject(p.mesh);
+  if (box.isEmpty()) return;
+  const sphere = box.getBoundingSphere(new THREE.Sphere());
+  const radius = Math.max(sphere.radius, 1e-3);
+  const distance = radius / Math.tan((perspective.fov / 2) * Math.PI / 180) * 1.08;
+  const camera = view.camera;
+  const from = {
+    dir: camera.position.clone().sub(controls.target).normalize(), up: camera.up.clone(),
+    distance: camera.position.distanceTo(controls.target), target: controls.target.clone(),
+    zoom: camera.zoom, half: camera.isOrthographicCamera ? (camera.top - camera.bottom) / 2 : 0,
+  };
+  const to = { dir: modelVector(VIEWS['3d'].dir).normalize(), up: modelVector(VIEWS['3d'].up), distance, target: sphere.center.clone() };
+  activeView = null;
+  window.webkit?.messageHandlers?.viewer?.postMessage('view: none');
+  const apply = (k) => {
+    const dir = from.dir.clone().lerp(to.dir, k).normalize();
+    controls.target.copy(from.target).lerp(to.target, k);
+    camera.up.copy(from.up).lerp(to.up, k).normalize();
+    camera.position.copy(controls.target).addScaledVector(dir, from.distance + (to.distance - from.distance) * k);
+    if (camera.isOrthographicCamera) {
+      // Frame by height: from what it showed to the radius that fits, zoom back to 1.
+      const half = from.half / from.zoom + (radius * 1.08 - from.half / from.zoom) * k;
+      camera.zoom = 1;
+      frameOrtho(half);
+    }
+    camera.lookAt(controls.target);
+    camera.updateProjectionMatrix();
+  };
+  cameraTween = {
+    start: performance.now(), duration: 250,
+    step(t) { apply(t * t * (3 - 2 * t)); },
+    finish() { apply(1); controls.maxDistance = distance * 4; setClipPlanes(camera); controls.update(); },
+  };
 }
 document.getElementById('home').addEventListener('click', homeView);
 
@@ -1192,6 +1267,7 @@ window.debug = {
     status: status.textContent,
     sceneRadius, cameraDistance: view.camera.position.distanceTo(controls.target), near: view.camera.near, far: view.camera.far,
     target: controls.target.toArray().map(Math.round), cameraPos: view.camera.position.toArray().map(Math.round),
+    tweening: !!cameraTween,
     panel: [document.body.clientWidth, document.body.clientHeight],
   }),
 

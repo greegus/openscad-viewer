@@ -63,6 +63,7 @@ expect "every piece covered by its faces" "$(echo "$out" | field "['covered']")"
 expect "shelf pitch"     "$(echo "$out" | field "['pitch']")" "Parallel faces · distance 305.0 mm"
 expect "section by clicking a face" "$(echo "$out" | field "['section']")" "ready z=300 keeping - caps=true"
 expect "view cube: click TOP, drag, home" "$(echo "$out" | field "['cube']")" '{"afterClick": "top 0,0,1", "afterDrag": null, "home": "0.54,-0.73,0.41", "topRegion": [0, 0, 1]}'
+expect "pills follow state; home animates to the opening framing" "$(echo "$out" | field "['pills']")" '{"animating": true, "home": "0.54,-0.73,0.41", "start": "normal isometric", "switched": "xray perspective xray perspective"}'
 expect "shelves and bottom resting on the side patch it" "$(echo "$out" | field "['shelfPatches']")" "20160"
 
 if [ $# -ge 1 ]; then

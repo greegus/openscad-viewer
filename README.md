@@ -267,8 +267,12 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
   look along it (a face a standard view, an edge or corner a three-quarter one) over a quarter of
   a second so the eye can follow, and the region the camera currently looks along is lit, so the
   cube says which view is on and not only which way is up. It replaced the row of view buttons. A **home** button to its left
-  reframes the whole model from the front-right-above, as the file opened — the camera only;
-  Cmd-R is the reload that also restores hidden pieces. Dragging on it
+  reframes the whole model from the front-right-above, as the file opened — the camera only,
+  eased over a quarter of a second like a cube click (direction, up, distance, target and the
+  orthographic zoom together); Cmd-R is the reload that also restores hidden pieces. Under the
+  cube, two glass pills: Solid / X-ray (icons) and Persp / Ortho. With those, the tools at the
+  bottom and the cube, every control lives in the page and the native control row is gone — the
+  web view fills the window. Edges are toggled from the palette (Cmd-K). Dragging on it
   orbits exactly as dragging on the model does — about the camera's own up, as OrbitControls
   does. It renders into a scissored viewport after the main scene with its own orthographic
   camera copying the main camera's orientation; its pointer events are taken in capture, ahead
@@ -295,8 +299,7 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
   (technical-drawing look) — x-ray keeps the normal background, so there is no reason to
   lighten them.
 - **Tools** — `Inspect`, `Measure`, `Section` — are a floating glass panel at the bottom centre of
-  the view, in the page rather than in the native control row, so their state and their look stay
-  with the tools themselves. Mutually exclusive, and clicking the active one switches it off. The
+  the view, in the page, so their state and their look stay with the tools themselves. Mutually exclusive, and clicking the active one switches it off. The
   inspection readout sits in the bottom right corner, opposite the parts list.
 - **Test fixture**: `Tests/groove.scad` — a board with a groove milled by `difference()`. It
   pins down three behaviours at once: the subtrahend is not outlined as a piece (1 piece, not
