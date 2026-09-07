@@ -412,7 +412,14 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
   }
 
   /// A dimensions value: each number with the model axis it lies along, for the axis dots.
-  const sized = (values, axes) => Object.assign(values.map((v, i) => ({ text: mm(v), axis: axes[i] ?? null })), { unit: 'mm' });
+  const sized = (values, axes) => {
+    const parts = values.map((v, i) => ({ text: mm(v), axis: axes[i] ?? null }));
+    // In the model's order, x y z, when every dimension has an axis — so dimensions and
+    // coordinates read alike, and a turned board's thickness is not first by accident. A
+    // board at an odd angle keeps its own order.
+    if (parts.every((p) => p.axis)) parts.sort((a, b) => 'xyz'.indexOf(a.axis) - 'xyz'.indexOf(b.axis));
+    return Object.assign(parts, { unit: 'mm' });
+  };
   /// A point, in the model's coordinates: x, y, z each behind its axis dot, no commas.
   const coords = (world) => {
     const m = worldToModelVector(world);
