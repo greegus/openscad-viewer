@@ -115,9 +115,12 @@ export function makeClickDetector(canvas, onClick) {
 
 /// Which axis a direction is aligned with, if any — handy for reading furniture panels.
 export function axisName(direction) {
+  // In the model's axes, the ones the grid draws and the design is written in: a Z-up design's
+  // top faces Z, whatever the scene calls up.
+  const m = worldToModelVector(direction);
   const axes = [['X', new THREE.Vector3(1, 0, 0)], ['Y', new THREE.Vector3(0, 1, 0)], ['Z', new THREE.Vector3(0, 0, 1)]];
   for (const [name, axis] of axes) {
-    if (Math.abs(Math.abs(direction.dot(axis)) - 1) < 1e-3) return name;
+    if (Math.abs(Math.abs(m.dot(axis)) - 1) < 1e-3) return name;
   }
   return null;
 }

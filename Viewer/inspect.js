@@ -284,10 +284,10 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
         u0 = Math.min(u0, a); u1 = Math.max(u1, a);
         w0 = Math.min(w0, b); w1 = Math.max(w1, b);
       }
-      const box = { width: u1 - u0, height: w1 - w0 };
+      const box = { width: u1 - u0, height: w1 - w0, u, w };
       if (!bestBox || box.width * box.height < bestBox.width * bestBox.height) bestBox = box;
     }
-    return { area, width: bestBox.width, height: bestBox.height };
+    return { area, width: bestBox.width, height: bestBox.height, u: bestBox.u, w: bestBox.w };
   }
 
   /// Extent of a set of triangles, reported in the model's own axes (Z-up).
@@ -411,6 +411,19 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
              piece: pieceAt(h.point), normal: info.planes[h.faceIndex].normal };
   }
 
+  /// A dimensions value: each number with the model axis it lies along, for the axis dots.
+  const sized = (values, axes) => Object.assign(values.map((v, i) => ({ text: mm(v), axis: axes[i] ?? null })), { unit: 'mm' });
+
+  /// Which model axis each of a piece's own axes lies along — its size is in its own axes, and
+  /// a board turned by the design (or a STEP file) has them elsewhere than a plain cube's.
+  function pieceAxes(piece) {
+    return [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map((d) => {
+      const local = new THREE.Vector3(...d).transformDirection(piece.world);
+      const axis = axisName(local);
+      return axis ? axis.toLowerCase() : null;
+    });
+  }
+
   /// Heading for the details panel: the piece's own name where it has one, its size where it
   /// does not, and the id beside it — the same pairing the parts list shows, so the two read as
   /// the same thing.
@@ -468,7 +481,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
       // Once only. The heading carries the piece's name when it has one and its size when it
       // does not, so adding a size row on top of this one printed the same numbers twice.
       return [
-        ['Width × depth × height', `${mm(sx)} × ${mm(sy)} × ${mm(sz)} mm`],
+        ['Width × depth × height', sized([sx, sy, sz], pieceAxes(p))],
         ['Volume', `${((sx * sy * sz) / 1e6).toFixed(2)} dm³`],
         ['Corner', at],
       ];
@@ -476,7 +489,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     if (target.type === 'body') {
       const b = bodyBox(target.mesh, target.triangles);
       return [
-        ['Size', `${mm(b.x)} × ${mm(b.y)} × ${mm(b.z)} mm`],
+        ['Size', sized([b.x, b.y, b.z], ['x', 'y', 'z'])],
         ['Triangles', String(target.triangles.length)],
         ['Note', 'no CSG box — extruded shape'],
       ];
@@ -516,7 +529,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     const f = faceInfo(target.mesh, target.triangles, target.normal, target.type === 'face' ? target.piece : null, target.face?.patches ?? []);
     const axis = axisName(target.normal);
     return [
-      ['Size', `${mm(f.width)} × ${mm(f.height)} mm`],
+      ['Size', sized([f.width, f.height], [f.u, f.w].map((d) => (d ? axisName(d)?.toLowerCase() ?? null : null)))],
       ['Area', `${(f.area / 100).toFixed(1)} cm²`],
       ...(axis ? [['Facing', axis]] : []),
     ];
