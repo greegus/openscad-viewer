@@ -270,7 +270,7 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
   reframes the whole model from the front-right-above, as the file opened — the camera only,
   eased over a quarter of a second like a cube click (direction, up, distance, target and the
   orthographic zoom together); Cmd-R is the reload that also restores hidden pieces. Under the
-  cube, two glass pills: Solid / X-ray (icons) and Persp / Ortho. With those, the tools at the
+  cube, two glass pills: Solid / X-ray and Persp / Ortho. With those, the tools at the
   bottom and the cube, every control lives in the page and the native control row is gone — the
   web view fills the window. Edges are toggled from the palette (Cmd-K). Dragging on it
   orbits exactly as dragging on the model does — about the camera's own up, as OrbitControls
