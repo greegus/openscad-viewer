@@ -44,7 +44,9 @@ export function createViewCube({ renderer, canvas, view, controls, onAim, onOrbi
     const c = document.createElement('canvas');
     c.width = c.height = 256;
     const ctx = c.getContext('2d');
-    ctx.fillStyle = '#d7d9dd';
+    // Text on white: the texture multiplies the material's colour, so a labelled face takes
+    // exactly the same base, hover and active tints as every other region.
+    ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, 256, 256);
     ctx.fillStyle = '#2b2e33';
     ctx.font = '600 58px -apple-system, system-ui, sans-serif';
@@ -71,7 +73,7 @@ export function createViewCube({ renderer, canvas, view, controls, onAim, onOrbi
     geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uv.flat(), 2));
     geometry.setIndex([0, 1, 2, 0, 2, 3]);
     // A labelled quad is drawn as its texture is; the tint is only for the plain ones.
-    const material = new THREE.MeshLambertMaterial({ color: map ? 0xffffff : BASE, map });
+    const material = new THREE.MeshLambertMaterial({ color: BASE, map });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.userData.key = key;
     root.add(mesh);
@@ -96,6 +98,21 @@ export function createViewCube({ renderer, canvas, view, controls, onAim, onOrbi
         quad(normal, u0, u1, v0, v1, key, isCentre ? label(LABELS[normal.join(',')]) : null);
       }
     }
+  }
+  // The regions, faintly: the lines where a face's centre ends and its edge and corner handles
+  // begin, so the handles can be seen before they are hovered.
+  {
+    const pts = [];
+    for (const normal of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
+      const n = new THREE.Vector3(...normal);
+      const [a, b] = basis(n);
+      const at = (uu, vv) => n.clone().multiplyScalar(1.001).addScaledVector(a, uu).addScaledVector(b, vv);
+      for (const f of [-FACE, FACE]) {
+        pts.push(at(f, -1), at(f, 1), at(-1, f), at(1, f));
+      }
+    }
+    const geometry = new THREE.BufferGeometry().setFromPoints(pts);
+    root.add(new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ color: 0x5a5e66, transparent: true, opacity: 0.35 })));
   }
   // Crisp edges over the quads.
   const outline = new THREE.LineSegments(
@@ -148,15 +165,12 @@ export function createViewCube({ renderer, canvas, view, controls, onAim, onOrbi
 
   // Two tints: the region the camera is looking along (the current view) and the one under the
   // pointer. Hover wins where they meet; the plain colour returns when neither applies.
-  const ACTIVE = 0x4f8fd8, ACTIVE_LABEL = 0xbcd6f5;
+  const ACTIVE = 0x4f8fd8;
   let hovered = null, active = null;
   function paint(region) {
     const state = region === hovered ? 'hover' : region === active ? 'active' : 'base';
     for (const m of region.meshes) {
-      const labelled = !!m.material.map;
-      m.material.color.set(state === 'hover' ? (labelled ? 0x9ec9ff : HOVER)
-                         : state === 'active' ? (labelled ? ACTIVE_LABEL : ACTIVE)
-                         : (labelled ? 0xffffff : BASE));
+      m.material.color.set(state === 'hover' ? HOVER : state === 'active' ? ACTIVE : BASE);
     }
   }
   function highlight(region) {

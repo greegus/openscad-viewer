@@ -1268,6 +1268,8 @@ export function cutBoxFromPolygons(mesh, polygons, component, slack = 0.02) {
   const box = prepareBox(component);
   const toPiece = meshToPiece(mesh, box);
   const fromPiece = toPiece.clone().invert();
+  // A mirroring transform reverses winding; the normal below is taken in piece space.
+  const flip = toPiece.determinant() < 0 ? -1 : 1;
 
   const planes = [
     { axis: 'x', sign: 1, at: box.min.x - slack }, { axis: 'x', sign: -1, at: box.max.x + slack },
@@ -1278,6 +1280,13 @@ export function cutBoxFromPolygons(mesh, polygons, component, slack = 0.02) {
   const out = [];
   for (const source of polygons) {
     let inside = source.map((p) => p.clone().applyMatrix4(toPiece));
+
+    // A face lying in one of the box's own planes belongs to the piece only if it faces
+    // outward. Facing *into* the box it is a neighbour's: the top of a board this piece sits
+    // on, the wall of a pocket it is let into. Those exist as triangles only in another
+    // material's mesh — in the piece's own mesh the union has welded them away — and cutting
+    // them left a hole in the chest's bottom the size of the unit that had stood on it.
+    if (facesIntoBox(inside, box, flip)) { out.push(source); continue; }
 
     for (const plane of planes) {
       if (inside.length < 3) break;
@@ -1305,6 +1314,37 @@ export function cutBoxFromPolygons(mesh, polygons, component, slack = 0.02) {
     // `inside` now lies within the box: that is the hidden piece's share, and it goes.
   }
   return out;
+}
+
+/// Diagnostics: a mesh polygon in a piece's space, and whether it faces into the piece's box.
+export function pieceSpaceReport(mesh, polygon, component) {
+  const box = prepareBox(component);
+  const toPiece = meshToPiece(mesh, box);
+  const flip = toPiece.determinant() < 0 ? -1 : 1;
+  const inside = polygon.map((p) => p.clone().applyMatrix4(toPiece));
+  return { points: inside.map((p) => [p.x, p.y, p.z].map((v) => Math.round(v * 1000) / 1000)),
+           flip, min: [box.min.x, box.min.y, box.min.z], max: [box.max.x, box.max.y, box.max.z],
+           into: facesIntoBox(inside, box, flip) };
+}
+
+/// Whether a polygon (in piece space) lies in one of the box's six planes with its normal
+/// pointing into the box — a neighbour's face that merely touches the piece.
+function facesIntoBox(polygon, box, flip = 1, tol = 0.01) {
+  if (polygon.length < 3) return false;
+  const a = polygon[0];
+  let normal = null;
+  for (let i = 1; i + 1 < polygon.length && !normal; i++) {
+    const n = new THREE.Vector3().subVectors(polygon[i], a)
+      .cross(new THREE.Vector3().subVectors(polygon[i + 1], a));
+    if (n.lengthSq() > 1e-8) normal = n.multiplyScalar(flip);
+  }
+  if (!normal) return false;
+  for (const axis of ['x', 'y', 'z']) {
+    for (const [at, inward] of [[box.min[axis], 1], [box.max[axis], -1]]) {
+      if (polygon.every((p) => Math.abs(p[axis] - at) <= tol) && normal[axis] * inward > 0) return true;
+    }
+  }
+  return false;
 }
 
 /// Fan-triangulates convex polygons into a flat position array, skipping degenerate slivers.

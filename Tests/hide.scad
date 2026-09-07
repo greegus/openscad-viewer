@@ -22,3 +22,11 @@ translate([0, 0, 700 - hr]) cube([400, 400, hr]);
 // whole, and hiding it must leave the unit whole.
 // @group Neighbour   @name Side board
 translate([400, 0, 0]) cube([hr, 400, 700]);
+
+// A block of another colour standing on the top board. Different colours are different
+// meshes, so the top board's upper face runs on under the block and the block's underside lies
+// on it, face to face in the same plane. Hiding the block must leave that face whole, and
+// hiding the unit must leave the block's underside: a face on a hidden piece's boundary that
+// looks into the piece is the neighbour's, not the piece's.
+// @group Neighbour   @name Red block
+color("red") translate([100, 100, 700]) cube([200, 200, 100]);

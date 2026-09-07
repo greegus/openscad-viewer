@@ -44,8 +44,29 @@ const sideHidden = {
 };
 window.debug.restore();
 
+// The plane z = 700 holds the top board's upper face (400 x 400) and, in another mesh, the
+// red block's underside (200 x 200) lying on it. Areas rather than counts: a face with a hole
+// cut in it still has triangles.
+// Out to x = 416: the side board's top is welded on to the top board's, so the polygon runs on.
+const topPlane = [[-1, -1, 700 - 0.01], [416, 401, 700 + 0.01]];
+const topPlaneArea = window.debug.areaWithin(topPlane[0], topPlane[1], 0.02);
+window.debug.setHidden(ids('Red block'), false);
+const blockHidden = {
+  // The board's face it stood on stays whole: 400 x 400.
+  planeArea: window.debug.areaWithin(topPlane[0], topPlane[1], 0.02),
+  leftInBlock: window.debug.trianglesWithin([101, 101, 701], [299, 299, 799]),
+};
+window.debug.restore();
+window.debug.setHidden(ids('Bottom', 'Back', 'Top'), false);
+const unitHiddenUnderBlock = {
+  // Only the block's underside may remain in that plane: 200 x 200.
+  planeArea: window.debug.areaWithin(topPlane[0], topPlane[1], 0.02),
+};
+window.debug.restore();
+
 return {
   names: c.map((x) => x.name),
+  topPlaneArea, blockHidden, unitHiddenUnderBlock,
   groups: c.map((x) => (x.groups ?? []).join('/')),
   rearBefore: rearBefore > 0,
   unitHidden, backHidden, sideHidden,
