@@ -72,7 +72,8 @@ export function createSection({ scene, renderer, view, readout, onRestore }) {
   const ghostButton = document.createElement('button');
   ghostButton.className = 'section-flip section-ghost';
   ghostButton.title = 'Show the cut-away half as a ghost';
-  ghostButton.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3 3h10v10H3z" /><path d="M8 3v10" /><path d="M8 3h5v10H8z" fill="currentColor" fill-opacity="0.35" stroke="none" /></svg>';
+  // The same eye the parts list uses for visibility.
+  ghostButton.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z"/><circle cx="8" cy="8" r="1.9"/></svg>';
   ghostButton.hidden = true;
   renderer.domElement.parentElement.appendChild(ghostButton);
   ghostButton.addEventListener('click', (e) => { e.stopPropagation(); api.toggleGhostHalf(); });
