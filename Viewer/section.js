@@ -12,7 +12,7 @@ import { MODEL_TO_WORLD, modelVector, worldToModelVector } from './picking.js';
 /// and front faces decrementing where the plane is, and whatever the count says is inside gets
 /// painted. That is the bulk of this file and the reason the tool is not two lines of
 /// `clippingPlanes`.
-export function createSection({ scene, renderer, view, readout }) {
+export function createSection({ scene, renderer, view, readout, onRestore }) {
 
   const AXES = {
     x: { label: 'X', dir: [1, 0, 0] },
@@ -26,9 +26,11 @@ export function createSection({ scene, renderer, view, readout }) {
     flipped: false,
     offset: 0,             // in model units, along the axis
     bounds: null,          // { min, max } along the axis, in model units
+    ghostHalf: false,      // the cut-away half shown translucent
   };
 
   const plane = new THREE.Plane();
+  const planeBack = new THREE.Plane();   // the same plane facing the other way: the removed half
   const capGroup = new THREE.Group();
   capGroup.renderOrder = 2;
   scene.add(capGroup);
@@ -66,6 +68,14 @@ export function createSection({ scene, renderer, view, readout }) {
   flipButton.hidden = true;
   renderer.domElement.parentElement.appendChild(flipButton);
   flipButton.addEventListener('click', (e) => { e.stopPropagation(); api.flip(); });
+  // And on the other side of the handle: the removed half as a ghost, on or off.
+  const ghostButton = document.createElement('button');
+  ghostButton.className = 'section-flip section-ghost';
+  ghostButton.title = 'Show the cut-away half as a ghost';
+  ghostButton.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3 3h10v10H3z" /><path d="M8 3v10" /><path d="M8 3h5v10H8z" fill="currentColor" fill-opacity="0.35" stroke="none" /></svg>';
+  ghostButton.hidden = true;
+  renderer.domElement.parentElement.appendChild(ghostButton);
+  ghostButton.addEventListener('click', (e) => { e.stopPropagation(); api.toggleGhostHalf(); });
 
   /// The handle's place and size: at the model's centre in the plane, its length a fraction of
   /// the model's span so it reads the same at any zoom of the model.
@@ -73,6 +83,8 @@ export function createSection({ scene, renderer, view, readout }) {
     const live = !!state.axis && state.stage !== 'off' && state.stage !== 'plane' && state.bounds;
     gizmo.visible = live;
     flipButton.hidden = !live;
+    ghostButton.hidden = !live;
+    ghostButton.classList.toggle('is-on', state.ghostHalf);
     if (!live) return;
     const b = state.bounds;
     const centre = { x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2, z: (b.min.z + b.max.z) / 2 };
@@ -96,6 +108,8 @@ export function createSection({ scene, renderer, view, readout }) {
     const x = (p.x * 0.5 + 0.5) * canvas.clientWidth, y = (-p.y * 0.5 + 0.5) * canvas.clientHeight;
     flipButton.style.left = `${x + 22}px`;
     flipButton.style.top = `${y - 14}px`;
+    ghostButton.style.left = `${x - 50}px`;
+    ghostButton.style.top = `${y - 14}px`;
   }
 
   // Dragging the handle slides the plane: the pointer's ray is matched against the normal line
@@ -208,6 +222,7 @@ export function createSection({ scene, renderer, view, readout }) {
   ///
   /// Must run with no axis too — that is how the planes come *off* when the tool stops. An early
   /// return there left the model cut after the tool was switched away from.
+  let wasGhostHalf = false;
   function updatePlane() {
     if (state.axis) {
       const normal = modelVector(AXES[state.axis].dir).multiplyScalar(state.flipped ? -1 : 1);
@@ -217,12 +232,19 @@ export function createSection({ scene, renderer, view, readout }) {
 
     const active = !!state.axis && (state.stage === 'ready' || state.stage === 'side');
     renderer.localClippingEnabled = active;
+    planeBack.copy(plane).negate();
+    // The removed half as a ghost: the x-ray meshes, clipped the other way, shown on top of the
+    // solid view. Off, the mode decides what the x-ray meshes do.
+    const ghostHalf = active && state.ghostHalf;
     for (const target of targets) {
-      for (const material of [target.mesh.material, target.xray.material]) {
-        material.clippingPlanes = active ? [plane] : [];
-        material.needsUpdate = true;
-      }
+      target.mesh.material.clippingPlanes = active ? [plane] : [];
+      target.mesh.material.needsUpdate = true;
+      target.xray.material.clippingPlanes = ghostHalf ? [planeBack] : active ? [plane] : [];
+      target.xray.material.needsUpdate = true;
+      if (ghostHalf) target.xray.visible = true;
     }
+    if (!ghostHalf && wasGhostHalf) onRestore?.();
+    wasGhostHalf = ghostHalf;
     // The edge overlay and the silhouettes are one object each for the whole model, not one per
     // material, so they take the plane here rather than in the loop above. Missing one would
     // leave lines hanging in the cut.
@@ -270,6 +292,12 @@ export function createSection({ scene, renderer, view, readout }) {
       state.stage = 'side';
       // Start in the middle: a plane at the very edge cuts nothing and looks broken.
       state.offset = state.bounds ? (state.bounds.min[axis] + state.bounds.max[axis]) / 2 : 0;
+      updatePlane();
+    },
+
+    /// The removed half shown translucent, or not.
+    toggleGhostHalf() {
+      state.ghostHalf = !state.ghostHalf;
       updatePlane();
     },
 

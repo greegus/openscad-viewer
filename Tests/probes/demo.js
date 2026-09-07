@@ -39,10 +39,15 @@ const section = (() => {
     canvas.dispatchEvent(new PointerEvent(t, { clientX: rect.left + h[0], clientY: rect.top + h[1] + dy, bubbles: true, pointerId: 1 }));
   }
   const dragged = Math.round(window.debug.section().offset);
-  document.querySelector('.section-flip').click();
+  document.querySelector('.section-flip:not(.section-ghost)').click();
   const flipped = window.debug.section().flipped;
+  // The other button shows the cut-away half as a ghost; off again, the x-ray meshes go back to the mode.
+  document.querySelector('.section-ghost').click();
+  const ghostHalf = window.debug.section().ghostHalf && window.debug.state().parts[0].xray === true;
+  document.querySelector('.section-ghost').click();
+  const restored = window.debug.state().parts[0].xray === false;
   setTool('inspect');
-  return `${d.stage} ${d.axis}=${Math.round(d.offset)} keeping ${d.flipped ? '-' : '+'} caps=${d.capVisible} ghost=${g ? g.position.join(',') + '/' + g.scale.slice(0, 2).join('x') : 'none'} dragged=${dragged > d.offset} flipped=${flipped}`;
+  return `${d.stage} ${d.axis}=${Math.round(d.offset)} keeping ${d.flipped ? '-' : '+'} caps=${d.capVisible} ghost=${g ? g.position.join(',') + '/' + g.scale.slice(0, 2).join('x') : 'none'} dragged=${dragged > d.offset} flipped=${flipped} ghostHalf=${ghostHalf}/${restored}`;
 })();
 // The view cube: a click on its TOP face aims the camera straight down; a drag on it orbits.
 const cube = (() => {

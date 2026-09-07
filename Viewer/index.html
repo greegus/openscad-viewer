@@ -177,6 +177,9 @@
   .section-flip:hover { background: rgba(50, 160, 255, 0.95); }
   .section-flip svg { width: 15px; height: 15px; display: block; }
   .section-flip[hidden] { display: none; }
+  .section-ghost { background: rgba(60, 64, 72, 0.9); }
+  .section-ghost:hover { background: rgba(90, 95, 105, 0.95); }
+  .section-ghost.is-on { background: rgba(10, 132, 255, 0.9); }
   /* Home, left of the view cube: back to the framing the file opened with. */
   #home {
     position: absolute; top: 12px; right: 138px;      /* cube is 118 wide at 12 from the edge */
@@ -251,7 +254,7 @@ import { STLLoader } from './vendor/STLLoader.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { createMeasure } from './measure.js';
 import { createInspect } from './inspect.js';
-import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, cutBoxFromPolygons, pieceSpaceReport, triangulateConvex, sphereSilhouette, pieceSilhouette, clippedArea, clipToBox, contactPatches, makeClickDetector, cursorPx, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
+import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, cutBoxFromPolygons, triangulateConvex, sphereSilhouette, pieceSilhouette, clippedArea, clipToBox, contactPatches, makeClickDetector, cursorPx, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
 import { updateStrokeResolution } from './strokes.js';
 import { createGrid } from './grid.js';
 import { createPalette } from './palette.js';
@@ -1248,6 +1251,7 @@ function paletteActions() {
 let section = createSection({
   scene, renderer, view,
   readout: (text) => { readoutEl.textContent = text; },
+  onRestore: () => setMode(mode),       // the ghost of the cut-away half borrowed the x-ray meshes
 });
 
 /// Section keyboard: the plane keeps moving until you switch the tool off.
@@ -1646,11 +1650,12 @@ window.debug = {
   triangles: () => parts.reduce((n, p) => n + p.mesh.geometry.attributes.position.count / 3, 0),
   // Area (mm², model space) of the triangles lying wholly within the region. Counting
   // triangles cannot tell a face from the same face with a hole cut in it; area can.
-  areaWithin: (min, max, slack = 0.01) => {
+  areaWithin: (min, max, slack = 0.01, onlyPart = -1) => {
     let area = 0;
     const v = [0, 1, 2].map(() => new THREE.Vector3());
     const worldToModel = new THREE.Matrix4().copy(MODEL_TO_WORLD).invert();
     for (const part of parts) {
+      if (onlyPart >= 0 && parts.indexOf(part) !== onlyPart) continue;
       const position = part.mesh.geometry.attributes.position;
       const m = new THREE.Matrix4().multiplyMatrices(worldToModel, part.mesh.matrixWorld);
       for (let t = 0; t < position.count / 3; t++) {
@@ -1663,24 +1668,6 @@ window.debug = {
       }
     }
     return Math.round(area);
-  },
-  cutReport: (id, min, max, slack = 0.01, onlyPart = -1) => {
-    const component = components.find((c) => c.id === id);
-    const out = [];
-    for (const part of parts) {
-      if (onlyPart >= 0 && parts.indexOf(part) !== onlyPart) continue;
-      const position = part.source.attributes.position;
-      const touching = new Set(trianglesTouchingBox(part.pristine, component));
-      const worldToModel = new THREE.Matrix4().copy(MODEL_TO_WORLD).invert();
-      const m = new THREE.Matrix4().multiplyMatrices(worldToModel, part.mesh.matrixWorld);
-      for (let t = 0; t < position.count / 3 && out.length < 12; t++) {
-        const v = [0, 1, 2].map((k) => new THREE.Vector3().fromBufferAttribute(position, t * 3 + k));
-        const inside = v.every((p) => { const q = p.clone().applyMatrix4(m); return ['x', 'y', 'z'].every((a, i) => q[a] >= min[i] - slack && q[a] <= max[i] + slack); });
-        if (!inside || !touching.has(t)) continue;
-        out.push({ part: parts.indexOf(part), t, ...pieceSpaceReport(part.pristine, v, component) });
-      }
-    }
-    return out;
   },
   hide: () => hideSelection(),
   selection: () => inspect?.selection() ?? null,

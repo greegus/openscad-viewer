@@ -1316,17 +1316,6 @@ export function cutBoxFromPolygons(mesh, polygons, component, slack = 0.02) {
   return out;
 }
 
-/// Diagnostics: a mesh polygon in a piece's space, and whether it faces into the piece's box.
-export function pieceSpaceReport(mesh, polygon, component) {
-  const box = prepareBox(component);
-  const toPiece = meshToPiece(mesh, box);
-  const flip = toPiece.determinant() < 0 ? -1 : 1;
-  const inside = polygon.map((p) => p.clone().applyMatrix4(toPiece));
-  return { points: inside.map((p) => [p.x, p.y, p.z].map((v) => Math.round(v * 1000) / 1000)),
-           flip, min: [box.min.x, box.min.y, box.min.z], max: [box.max.x, box.max.y, box.max.z],
-           into: facesIntoBox(inside, box, flip) };
-}
-
 /// Whether a polygon (in piece space) lies in one of the box's six planes with its normal
 /// pointing into the box — a neighbour's face that merely touches the piece.
 function facesIntoBox(polygon, box, flip = 1, tol = 0.01) {

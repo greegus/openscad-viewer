@@ -384,7 +384,14 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
     belonging to nothing (the chest's right side and its rear batten did the same). Cutting
     leaves exactly the neighbours' share: hiding the chest takes 3 of the welded right side's
     4 triangles' worth and leaves the cabinet's 1220 mm above it; hiding the unit leaves 0
-    triangles in its extent. `Tests/hide.scad` pins all three cases down. Lookups run against
+    triangles in its extent. `Tests/hide.scad` pins all three cases down.
+    The cut spares one kind of face inside its reach: a polygon lying **in one of the box's own
+    planes with its normal pointing into the box**. That face is a neighbour's — the top of the
+    board the piece stood on, the wall of the pocket it was let into — and it exists as
+    triangles only in *another material's* mesh, since in the piece's own mesh the union has
+    welded it away. Cutting it left a hole in kniznica.scad's chest bottom the size of the
+    nested unit that had stood on it (`facesIntoBox`; the red block in `Tests/hide.scad`, and
+    `debug.areaWithin`, since a face with a hole in it still has triangles). Lookups run against
     a pristine copy of each mesh, since the piece caches hold triangle indices into whatever
     they scanned and the live geometry shrinks with every hide.
   - Holding the modifier lights up the piece's **faces** as well as its outline, and those are
@@ -618,8 +625,10 @@ half a millimetre into the material, or the face's own skin and the cap would fi
 pixels. Before the click, a **ghost** of that cut follows the pointer: a translucent sheet in the
 plane the click would cut along, the size of the whole model across it, so the cut is not a guess.
 Once cut, a two-headed arrow stands on the plane at the model's centre: dragging it slides the
-plane along its axis (the pointer's ray is matched against the axis line), and a button beside
-it swaps the kept side. Clicking another face cuts there instead. Arrow keys move the plane 1 mm, Shift 10 mm,
+plane along its axis (the pointer's ray is matched against the axis line), a button beside it
+swaps the kept side, and one on its other side shows the cut-away half as a **ghost** — the
+x-ray meshes, clipped the other way, over the solid view; off again, the display mode decides
+what the x-ray meshes do. Clicking another face cuts there instead. Arrow keys move the plane 1 mm, Shift 10 mm,
 Tab flips the kept side, Escape stops. `Cut along X/Y/Z` from the palette starts in the middle
 of the model, because a plane at the edge cuts nothing and looks broken. The cut takes the edge
 overlay and the silhouettes with it, so no line hangs in the cut. (The readout had promised
