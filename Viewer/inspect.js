@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { toScreen, cursorPx, pointToSegment2D, pieceFeatures, featureUnderCursor, pieceSilhouette, contactPatches,
+import { toScreen, cursorPx, pointToSegment2D, pieceFeatures, featureUnderCursor, pieceSilhouette, contactPatches, worldToModelVector,
          axisName, pieceFaces, assignTriangles, trianglesTouchingBox, trianglesInBox, clipToBox,
          MODEL_TO_WORLD } from './picking.js';
 import { createStroke } from './strokes.js';
@@ -413,6 +413,11 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
 
   /// A dimensions value: each number with the model axis it lies along, for the axis dots.
   const sized = (values, axes) => Object.assign(values.map((v, i) => ({ text: mm(v), axis: axes[i] ?? null })), { unit: 'mm' });
+  /// A point, in the model's coordinates: x, y, z each behind its axis dot, no commas.
+  const coords = (world) => {
+    const m = worldToModelVector(world);
+    return Object.assign([m.x, m.y, m.z].map((v, i) => ({ text: mm(v), axis: 'xyz'[i] })), { unit: 'mm', sep: ' ' });
+  };
 
   /// Which model axis each of a piece's own axes lies along — its size is in its own axes, and
   /// a board turned by the design (or a STEP file) has them elsewhere than a plain cube's.
@@ -456,26 +461,36 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
       const f = target.feature;
       if (f.type === 'arc') {
         const axis = axisName(f.normal);
+        const closed = f.sweep > 2 * Math.PI - 1e-3;
         return [
           ['Radius', `${mm(f.radius)} mm`],
           ['Sweep', `${(f.sweep * 180 / Math.PI).toFixed(1)}°`],
           ['Length', `${mm(f.length)} mm`],
           ...(axis ? [['Around', axis]] : []),
+          ['Centre', coords(f.centre)],
+          // A closed circle has no start or end worth naming.
+          ...(closed ? [] : [['Start', coords(f.segments[0].a)], ['End', coords(f.segments[f.segments.length - 1].b)]]),
         ];
       }
       if (f.type === 'ellipse') {
         return [
           ['Semi-axes', `${mm(f.a)} × ${mm(f.b)} mm`],
           ['Length', `${mm(f.length)} mm`],
+          ['Centre', coords(f.centre)],
         ];
       }
       const axis = axisName(f.b.clone().sub(f.a).normalize());
-      return [['Length', `${mm(f.length)} mm`], ...(axis ? [['Along', axis]] : [])];
+      return [
+        ['Length', `${mm(f.length)} mm`],
+        ...(axis ? [['Along', axis]] : []),
+        ['Start', coords(f.a)],
+        ['End', coords(f.b)],
+      ];
     }
     if (target.type === 'part') {
       const p = target.piece;
       const [sx, sy, sz] = p.size;
-      const at = p.corner.map((v) => Math.round(v)).join(', ');
+      const at = Object.assign(p.corner.map((v, i) => ({ text: mm(v), axis: 'xyz'[i] })), { unit: 'mm', sep: ' ' });
       // The size is in the heading when the piece is named; otherwise it *is* the heading, so
       // repeating it here would say the same thing twice.
       // Once only. The heading carries the piece's name when it has one and its size when it

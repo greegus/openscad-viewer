@@ -73,7 +73,8 @@ const keys = (() => {
   const key = (k) => window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
   const tool = () => window.debug.state().tool;
   key('m'); const m = tool(); key('s'); const s = tool(); key('Escape'); const esc = tool();
-  key('p'); const hidden = getComputedStyle(document.getElementById('parts-tree')).display === 'none'; key('p');
+  setView('top'); key('h'); window.debug.settleCamera(); window.debug.snapshot(); const h = window.debug.cameraDirection().join(',');
+  key('p'); const hidden = document.querySelectorAll('#parts-tree .tree-row').length; key('p');   // folded: the header alone, no rows
   key('ArrowDown'); key('ArrowDown'); key('ArrowDown'); window.debug.snapshot();
   const cursor = `${document.querySelector('.tree-row.is-cursor .tree-name')?.textContent} lit #${window.debug.inspect().hoverPiece}`;
   key('Enter'); const selected = window.debug.inspect().selectPiece;
@@ -85,7 +86,15 @@ const keys = (() => {
   canvas.dispatchEvent(new PointerEvent('dblclick', { clientX: rect.left + px[0], clientY: rect.top + px[1], bubbles: true, pointerId: 1 }));
   const dbl = `${window.debug.inspect().selectType} #${window.debug.inspect().selectPiece}`;
   key('Escape');
-  return `${m} ${s} ${esc} p:${hidden} ${cursor} enter:#${selected} folded:${folded} dblclick:${dbl}`;
+  // Shift + T turns to the top view; Shift + X switches to x-ray and back.
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'T', shiftKey: true, bubbles: true }));
+  window.debug.settleCamera(); window.debug.snapshot();
+  const shift = `${window.debug.state().activeView},${window.debug.cameraDirection()}`;
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'X', shiftKey: true, bubbles: true }));
+  const xray = window.debug.state().mode;
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'X', shiftKey: true, bubbles: true }));
+  setView('3d');
+  return `${m} ${s} ${esc} h:${h} p:${hidden} ${cursor} enter:#${selected} folded:${folded} dblclick:${dbl} shift:${shift} ${xray}`;
 })();
 // The palette finds X-ray by "xray", the orthographic projection by "parallel", and has Home.
 const palette = (() => {

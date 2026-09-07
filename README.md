@@ -300,8 +300,9 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
   lighten them.
 - **Tools** — `Inspect`, `Measure`, `Section` — are a floating glass panel at the bottom centre of
   the view, in the page, so their state and their look stay with the tools themselves. Keys: **V** or **I**
-  Inspect, **M** Measure, **S** Section, **Escape** back to Inspect (in Inspect it clears the
-  selection, as before); **P** hides and shows the parts list. In the list the **arrows** walk a
+  Inspect, **M** Measure, **H** home, **Shift+F/K/L/R/T/B** the front, back, left, right, top and
+  bottom views (turned to, like a cube click), **Shift+X** solid ↔ x-ray, **S** Section, **Escape** back to Inspect (in Inspect it clears the
+  selection, as before); **P** folds the parts list to its header and opens it again. In the list the **arrows** walk a
   cursor — its row's pieces lit in the scene as a hover would — **Enter** selects a piece or folds
   a group, **Left** folds a group or goes from a piece to its group, **Right** unfolds; while a
   section is live the up and down arrows still move the plane. A group's name selects nothing —
@@ -321,6 +322,10 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
     and blue), so a board the design has turned — or one from a STEP file — reads as
     `[y]565 × [z]1415 × [x]15` rather than leaving you to guess which 15 is the thickness. Axes
     are the model's throughout: a Z-up design's top faces Z, whatever the scene calls up.
+    An edge names its start and end, an arc its centre, a part its corner — as coordinates in the
+    model's axes, each number behind its axis dot, no commas. The panel has a fixed width with
+    the labels right-aligned, the id first in its heading and a rule between heading and values,
+    and it is not shown at all while there is nothing to say.
   - A "face" is not a triangle. The mesh is a triangle soup, so faces are reconstructed once
     per part by welding triangles that share an edge and lie in the same plane — otherwise
     clicking a panel would select half a rectangle.

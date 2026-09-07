@@ -51,7 +51,14 @@ const dots = (() => {
     window.debug.snapshot();
     return [...document.querySelectorAll('.readout-table span')].map((s) => s.innerHTML.replace(/<span class="axis-dot axis-(.)"><\/span>/g, '[$1]')).filter(Boolean).join(' ');
   };
-  return { piece: hover([20, 20, 40], true), face: hover([20, 20, 40], false) };
+  const piece = hover([20, 20, 40], true), face = hover([20, 20, 40], false);
+  // An edge names its ends; over empty space the panel is not shown at all.
+  const edge = hover([20, 0, 40], false);
+  const px = window.debug.worldToScreen([-60, 60, 60]);
+  canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: rect.left + 5, clientY: rect.top + 5, bubbles: true, pointerId: 1 }));
+  window.debug.snapshot();
+  const emptyHidden = getComputedStyle(document.getElementById('readout')).display === 'none';
+  return { piece, face, edge, emptyHidden };
 })();
 return {
   dots,

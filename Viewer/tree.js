@@ -243,6 +243,8 @@ export function createTree({ container, onToggle, isHidden, label, onHover, onSe
     select,
     refresh: render,
     key,
-    get visible() { return !container.hidden; },
+    /// Folds the whole list to its header, or opens it again — what the header's caret does.
+    togglePanel: () => { panelOpen = !panelOpen; render(); },
+    get isOpen() { return panelOpen; },
   };
 }

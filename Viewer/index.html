@@ -71,7 +71,6 @@
     font: 12px -apple-system, system-ui, sans-serif;
     color: rgba(255, 255, 255, 0.9);
   }
-  #parts-tree.is-hidden { display: none; }
   .tree-header {
     display: flex; align-items: center; gap: 6px;
     appearance: none; border: 0; cursor: pointer; width: 100%; text-align: left;
@@ -98,17 +97,18 @@
   }
   .is-selected .tree-id { color: rgba(255, 255, 255, 0.7); }
   .readout-title {
-    display: flex; align-items: baseline; gap: 6px;
-    font-weight: 600; margin-bottom: 3px;
+    display: flex; align-items: baseline; gap: 8px; font-weight: 600; font-size: 13px;
+    padding-bottom: 5px; margin-bottom: 4px;
+    border-bottom: 0.5px solid rgba(255, 255, 255, 0.14);
   }
   .readout-id { color: rgba(255, 255, 255, 0.35); font-weight: 400; font-size: 11px;
                 font-variant-numeric: tabular-nums; }
   /* Two columns, so values line up and can be compared down the panel. */
   .readout-table {
-    display: grid; grid-template-columns: auto 1fr; gap: 2px 10px;
-    font-variant-numeric: tabular-nums;
+    display: grid; grid-template-columns: 82px 1fr; gap: 2px 10px;
+    margin-top: 4px; align-items: baseline;
   }
-  .readout-key { color: rgba(255, 255, 255, 0.45); }
+  .readout-key { color: rgba(255, 255, 255, 0.45); text-align: right; white-space: nowrap; }
   .tree-name { flex: 1; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tree-caret {
     appearance: none; border: 0; background: transparent; cursor: pointer;
@@ -126,8 +126,9 @@
   .tree-eye.is-off { color: rgba(255, 255, 255, 0.4); }
   #readout {
     /* Bottom right: out of the way of the parts list (top left) and of the model, which sits
-       in the middle; it reads like a status field. */
-    position: absolute; right: 10px; bottom: 10px; max-width: 260px;
+       in the middle; it reads like a status field. A fixed width, so it does not breathe as the
+       pointer moves from a short value to a long one. */
+    position: absolute; right: 10px; bottom: 10px; width: 300px; box-sizing: border-box;
     padding: 6px 11px; border-radius: 8px;
     font: 12px -apple-system, system-ui, sans-serif;
     color: rgba(255, 255, 255, 0.92);
@@ -248,17 +249,21 @@ function showReadout(text, heading) {
   if (heading) {
     const title = document.createElement('div');
     title.className = 'readout-title';
-    const name = document.createElement('span');
-    name.textContent = heading.name;
-    title.appendChild(name);
+    // The id first — it is what the parts list is sorted by and what a note refers to — then
+    // the name; a rule under both separates them from the values.
     if (heading.id !== null && heading.id !== undefined) {
       const id = document.createElement('span');
       id.className = 'readout-id';
       id.textContent = `#${heading.id}`;
       title.appendChild(id);
     }
+    const name = document.createElement('span');
+    name.textContent = heading.name;
+    title.appendChild(name);
     readoutEl.appendChild(title);
   }
+  // Nothing to say — leave the panel empty, and :empty hides it.
+  if (!text || (typeof text !== 'string' && !text.length)) return;
   // A plain string still works — the section tool writes one line of running text.
   if (typeof text === 'string') {
     const line = document.createElement('div');
@@ -278,7 +283,7 @@ function showReadout(text, heading) {
     // colour (the grid's) in front of it, so 600 × 400 × 800 reads as x, y, z at a glance.
     if (Array.isArray(value)) {
       value.forEach((part, i) => {
-        if (i) val.appendChild(document.createTextNode(' × '));
+        if (i) val.appendChild(document.createTextNode(value.sep ?? ' × '));
         if (part.axis) { const dot = document.createElement('span'); dot.className = `axis-dot axis-${part.axis}`; val.appendChild(dot); }
         val.appendChild(document.createTextNode(part.text));
       });
@@ -1023,38 +1028,44 @@ window.addEventListener('keydown', (event) => {
   if (hideSelection()) event.preventDefault();
 });
 
-/// Single-key shortcuts: V or I Inspect, M Measure, S Section, P the parts list; Escape leaves any
+/// Single-key shortcuts: V or I Inspect, M Measure, S Section, P the parts list, H home; Escape leaves any
 /// other tool for Inspect, the default. Plain keys only — with a modifier they are the app's,
 /// and in the palette they are typing.
+/// With Shift: the standard views — F front, K back, L left, R right, T top, B bottom — turned
+/// to over a quarter of a second like a cube click, and X to switch between solid and x-ray.
+const SHIFT_VIEWS = { f: 'front', k: 'back', l: 'left', r: 'right', t: 'top', b: 'bottom' };
 window.addEventListener('keydown', (event) => {
   if (palette?.isOpen || event.metaKey || event.ctrlKey || event.altKey) return;
   const key = event.key.toLowerCase();
+  if (event.shiftKey) {
+    if (SHIFT_VIEWS[key]) {
+      const preset = VIEWS[SHIFT_VIEWS[key]];
+      aimCamera(modelVector(preset.dir), modelVector(preset.up), 250);
+      event.preventDefault();
+    } else if (key === 'x') { setMode(mode === 'xray' ? 'normal' : 'xray'); event.preventDefault(); }
+    return;
+  }
   if (key === 'v' || key === 'i') { setTool('inspect'); event.preventDefault(); }
   else if (key === 'm') { setTool('measure'); event.preventDefault(); }
   else if (key === 's') { setTool('section'); event.preventDefault(); }
-  else if (key === 'p') { togglePartsList(); event.preventDefault(); }
+  else if (key === 'p') { tree.togglePanel(); event.preventDefault(); }
+  else if (key === 'h') { homeView(); event.preventDefault(); }
   // The parts list has the arrows and Enter, unless a section is live — there the arrows move
   // the plane. Escape first takes the list's cursor away, then leaves a tool for Inspect.
   else if (['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(event.key)) {
     if (section.stage !== 'off' && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) return;
-    if (!partsListHidden && tree.key(event)) event.preventDefault();
+    if (tree.key(event)) event.preventDefault();
   }
   else if (event.key === 'Escape') {
     // A step back: the list's cursor first, then a measurement in progress (Measure clears it
     // itself), and only then does the tool give way to Inspect.
-    if (!partsListHidden && tree.key(event)) { event.preventDefault(); return; }
+    if (tree.key(event)) { event.preventDefault(); return; }
     if (tool === 'measure' && measure?.hasPicks) return;
     if (tool !== 'inspect') { setTool('inspect'); event.preventDefault(); }
   }
 });
 
-let partsListHidden = false;
-function togglePartsList() {
-  // A class, not the `hidden` attribute: the panel's own `display: flex` outranks the
-  // attribute's display: none, so the attribute changed nothing you could see.
-  partsListHidden = !partsListHidden;
-  document.getElementById('parts-tree').classList.toggle('is-hidden', partsListHidden);
-}
+
 
 /// Loads either the per-material manifest or, as a fallback, one colourless mesh.
 /// Reframing is for opening a file, not for redrawing one that changed while you were looking
@@ -1169,12 +1180,12 @@ function paletteActions() {
       () => setMode(mode === 'xray' ? 'normal' : 'xray'), null, ['xray', 'transparent', 'solid']);
   add('View', 'Perspective projection', () => setProjection('perspective'), null, ['persp']);
   add('View', 'Orthographic projection', () => setProjection('isometric'), null, ['ortho', 'parallel', 'isometric']);
-  add('View', 'Home view', homeView, null, ['reset', 'fit', 'frame', 'default']);
+  add('View', 'Home view', homeView, 'H', ['reset', 'fit', 'frame', 'default']);
   for (const name of Object.keys(VIEWS)) {
     if (name === '3d') continue;
     add('View', name[0].toUpperCase() + name.slice(1) + ' view', () => setView(name));
   }
-  add('View', partsListHidden ? 'Show the parts list' : 'Hide the parts list', togglePartsList, 'P');
+  add('View', tree.isOpen ? 'Collapse the parts list' : 'Expand the parts list', () => tree.togglePanel(), 'P');
 
   add('Overlay', edgesOn ? 'Hide edges' : 'Show edges', () => setEdges(!edgesOn));
 
