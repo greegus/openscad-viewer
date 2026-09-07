@@ -1022,13 +1022,13 @@ window.addEventListener('keydown', (event) => {
   if (hideSelection()) event.preventDefault();
 });
 
-/// Single-key shortcuts: V Inspect, M Measure, S Section, P the parts list; Escape leaves any
+/// Single-key shortcuts: V or I Inspect, M Measure, S Section, P the parts list; Escape leaves any
 /// other tool for Inspect, the default. Plain keys only — with a modifier they are the app's,
 /// and in the palette they are typing.
 window.addEventListener('keydown', (event) => {
   if (palette?.isOpen || event.metaKey || event.ctrlKey || event.altKey) return;
   const key = event.key.toLowerCase();
-  if (key === 'v') { setTool('inspect'); event.preventDefault(); }
+  if (key === 'v' || key === 'i') { setTool('inspect'); event.preventDefault(); }
   else if (key === 'm') { setTool('measure'); event.preventDefault(); }
   else if (key === 's') { setTool('section'); event.preventDefault(); }
   else if (key === 'p') { togglePartsList(); event.preventDefault(); }

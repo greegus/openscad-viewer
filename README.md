@@ -299,7 +299,7 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
   (technical-drawing look) — x-ray keeps the normal background, so there is no reason to
   lighten them.
 - **Tools** — `Inspect`, `Measure`, `Section` — are a floating glass panel at the bottom centre of
-  the view, in the page, so their state and their look stay with the tools themselves. Keys: **V**
+  the view, in the page, so their state and their look stay with the tools themselves. Keys: **V** or **I**
   Inspect, **M** Measure, **S** Section, **Escape** back to Inspect (in Inspect it clears the
   selection, as before); **P** hides and shows the parts list. In the list the **arrows** walk a
   cursor — its row's pieces lit in the scene as a hover would — **Enter** selects a piece or folds
