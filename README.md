@@ -700,7 +700,10 @@ so it works in the Quick Look panel too, which has no menu bar and no toolbar. T
 for what they will do ("Hide edges" while they are on), and host actions appear only where they
 exist: the Quick Look panel has neither an export nor a reload, and listing something that
 cannot run is worse than not listing it. Matching is substring, ranked so a word that starts
-with the query wins — with a couple of dozen actions, fuzzy matching mostly produces surprises.
+with the query wins — with a couple of dozen actions, fuzzy matching mostly produces surprises;
+hyphens and spaces do not count ("xray" finds X-ray) and an action can carry other names for
+itself ("parallel" finds the orthographic projection). Perspective and orthographic are two
+entries, not a toggle; Home view and the parts list are there too, with their keys.
 
 **Live reload.** A save in your editor re-renders the model and leaves the camera exactly where
 you put it; only the grid and the clip planes follow the new geometry, since an edit can change

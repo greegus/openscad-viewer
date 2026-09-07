@@ -23,14 +23,19 @@ export function createPalette({ actions, onRun }) {
   /// Substring matching, ranked so a word that *starts* with the query wins.
   /// Deliberately not fuzzy: with a couple of dozen actions, fuzzy matching mostly produces
   /// surprises — "to" should find Top, not Restore all.
+  /// Hyphens and spaces do not count, so "xray" finds X-ray; an action's `keywords` are other
+  /// names for the same thing — "parallel" finds the orthographic projection.
+  const fold = (text) => text.toLowerCase().replace(/[\s-]+/g, '');
   function score(action, query) {
-    const title = action.title.toLowerCase();
-    const group = (action.group ?? '').toLowerCase();
     if (!query) return 1;
+    const q = fold(query);
+    const title = action.title.toLowerCase();
     const at = title.indexOf(query);
     if (at === 0) return 100;
     if (at > 0) return title[at - 1] === ' ' ? 80 : 40;
-    return group.includes(query) ? 20 : 0;
+    if (fold(title).includes(q)) return 60;
+    if ((action.keywords ?? []).some((k) => fold(k).includes(q))) return 50;
+    return (action.group ?? '').toLowerCase().includes(query) ? 20 : 0;
   }
 
   function render() {

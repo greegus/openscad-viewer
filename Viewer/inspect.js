@@ -575,7 +575,8 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     if (!selected) readout(hovered ? describe(hovered) : hint(), heading(hovered));
   }
 
-  const hint = () => 'Click an edge or a face · hold ⌘ for the whole part';
+  // No hint: the panel is empty until something is under the pointer or selected.
+  const hint = () => '';
 
   /// Selects a piece named from outside — a click in the parts list.
   ///

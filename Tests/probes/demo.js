@@ -87,6 +87,15 @@ const keys = (() => {
   key('Escape');
   return `${m} ${s} ${esc} p:${hidden} ${cursor} enter:#${selected} folded:${folded} dblclick:${dbl}`;
 })();
+// The palette finds X-ray by "xray", the orthographic projection by "parallel", and has Home.
+const palette = (() => {
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true }));
+  const input = document.querySelector('.palette-input');
+  const first = (text) => { input.value = text; input.dispatchEvent(new Event('input', { bubbles: true })); return document.querySelector('.palette-row')?.textContent.replace(/\s+/g, ' ').trim() ?? ''; };
+  const r = [first('xray'), first('parallel'), first('home')].join(' / ');
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  return r;
+})();
 const c = window.debug.components();
 const cov = window.debug.pieceCoverage();
 return {
@@ -97,6 +106,7 @@ return {
   cube,
   pills,
   keys,
+  palette,
   // The left side's inner face is whole although two shelves rest on it: the mesh has holes
   // there, the face has patches: 2 shelves × 18 × 360 and the bottom × 18 × 400.
   shelfPatches: (window.debug.patches(1) || []).filter((p) => p.normal[0] === 1).reduce((n, p) => n + p.area, 0),
