@@ -425,6 +425,7 @@ export function createMeasure({ scene, view, renderer, readout }) {
 
   return {
     setTargets, setOccluders, setEnabled, setOcclusion, setFacePicker, clear, update,
+    get hasPicks() { return state.picks.length > 0; },
     // Diagnostic hooks: they let the maths be verified without simulating clicks.
     edges: () => state.features.flatMap((f) => f.segments).map((e, i) => ({
       i,

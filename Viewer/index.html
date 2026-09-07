@@ -1024,7 +1024,10 @@ window.addEventListener('keydown', (event) => {
     if (!partsListHidden && tree.key(event)) event.preventDefault();
   }
   else if (event.key === 'Escape') {
+    // A step back: the list's cursor first, then a measurement in progress (Measure clears it
+    // itself), and only then does the tool give way to Inspect.
     if (!partsListHidden && tree.key(event)) { event.preventDefault(); return; }
+    if (tool === 'measure' && measure?.hasPicks) return;
     if (tool !== 'inspect') { setTool('inspect'); event.preventDefault(); }
   }
 });
