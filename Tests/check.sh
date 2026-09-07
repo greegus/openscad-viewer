@@ -35,7 +35,7 @@ expect "measure board top to cube top"    "$(echo "$out" | field "['measured']['
 expect "measure corner to corner"          "$(echo "$out" | field "['measured']['vertices']")" "Vertex to vertex · distance 102.0 mm"
 expect "measure rim centre to rim centre"  "$(echo "$out" | field "['measured']['centres']")" "Centre to centre · distance 80.6 mm"
 expect "measure corner to face"            "$(echo "$out" | field "['measured']['vertexFace']")" "Vertex to face · distance 25.0 mm"
-expect "axis dots on the cube's dimensions" "$(echo "$out" | field "['dots']['piece']")" "Width × depth × height [x]40 × [y]40 × [z]40 mm Volume 0.06 dm³ Corner 0, 0, 0"
+expect "axis dots on the cube's dimensions" "$(echo "$out" | field "['dots']['piece']")" "Dimensions [x]40 × [y]40 × [z]40 mm Volume 0.06 dm³ Corner 0, 0, 0"
 expect "the cube's top faces Z, in the model's axes" "$(echo "$out" | field "['dots']['face']")" "Size [x]40 × [y]40 mm Area 16.0 cm² Facing Z"
 
 echo "Tests/flush.scad"
@@ -66,7 +66,7 @@ expect "shelf pitch"     "$(echo "$out" | field "['pitch']")" "Parallel faces ·
 expect "section by clicking a face" "$(echo "$out" | field "['section']")" "ready z=300 keeping - caps=true"
 expect "view cube: click TOP, drag, home" "$(echo "$out" | field "['cube']")" '{"afterClick": "top 0,0,1", "afterDrag": null, "home": "0.54,-0.73,0.41", "topRegion": [0, 0, 1]}'
 expect "pills follow state; home animates to the opening framing" "$(echo "$out" | field "['pills']")" '{"animating": true, "home": "0.54,-0.73,0.41", "start": "normal isometric", "switched": "xray perspective xray perspective"}'
-expect "keys: tools, parts list, list cursor" "$(echo "$out" | field "['keys']")" "measure section inspect p:true Right side lit #2 enter:#2 folded:5"
+expect "keys: tools, parts list, list cursor" "$(echo "$out" | field "['keys']")" "measure section inspect p:true Right side lit #2 enter:#2 folded:5 dblclick:part #7"
 expect "shelves and bottom resting on the side patch it" "$(echo "$out" | field "['shelfPatches']")" "20160"
 
 if [ $# -ge 1 ]; then

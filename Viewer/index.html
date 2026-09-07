@@ -71,6 +71,7 @@
     font: 12px -apple-system, system-ui, sans-serif;
     color: rgba(255, 255, 255, 0.9);
   }
+  #parts-tree.is-hidden { display: none; }
   .tree-header {
     display: flex; align-items: center; gap: 6px;
     appearance: none; border: 0; cursor: pointer; width: 100%; text-align: left;
@@ -1049,8 +1050,10 @@ window.addEventListener('keydown', (event) => {
 
 let partsListHidden = false;
 function togglePartsList() {
+  // A class, not the `hidden` attribute: the panel's own `display: flex` outranks the
+  // attribute's display: none, so the attribute changed nothing you could see.
   partsListHidden = !partsListHidden;
-  document.getElementById('parts-tree').hidden = partsListHidden;
+  document.getElementById('parts-tree').classList.toggle('is-hidden', partsListHidden);
 }
 
 /// Loads either the per-material manifest or, as a fallback, one colourless mesh.

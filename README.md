@@ -313,10 +313,10 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
   groove walls still show as mesh edges.
 - **Inspect** (`Web/inspect.js`): hover highlights what is under the cursor, a click selects it.
   Granularity follows the modifier — plain gives the edge under the cursor, else the face;
-  holding **Command** gives the whole part. Not Ctrl as well: on macOS Ctrl-click is a
+  holding **Command** gives the whole part, and so does a **double click** on a face. Not Ctrl as well: on macOS Ctrl-click is a
   synthesised secondary click and would collide with the context menu.
   - An edge reports length and the axis it runs along; a face reports its in-plane size, area
-    and facing; a part reports `w × d × h`, volume, model-space corner and an **id**. Every
+    and facing; a part reports its dimensions, volume, model-space corner and an **id**. Every
     dimension carries a dot in the colour of the model axis it lies along (the grid's red, green
     and blue), so a board the design has turned — or one from a STEP file — reads as
     `[y]565 × [z]1415 × [x]15` rather than leaving you to guess which 15 is the thickness. Axes

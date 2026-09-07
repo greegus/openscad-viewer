@@ -73,13 +73,19 @@ const keys = (() => {
   const key = (k) => window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
   const tool = () => window.debug.state().tool;
   key('m'); const m = tool(); key('s'); const s = tool(); key('Escape'); const esc = tool();
-  key('p'); const hidden = document.getElementById('parts-tree').hidden; key('p');
+  key('p'); const hidden = getComputedStyle(document.getElementById('parts-tree')).display === 'none'; key('p');
   key('ArrowDown'); key('ArrowDown'); key('ArrowDown'); window.debug.snapshot();
   const cursor = `${document.querySelector('.tree-row.is-cursor .tree-name')?.textContent} lit #${window.debug.inspect().hoverPiece}`;
   key('Enter'); const selected = window.debug.inspect().selectPiece;
   key('ArrowLeft'); key('ArrowLeft'); const folded = document.querySelectorAll('.tree-row').length;
   key('ArrowRight'); key('Escape'); key('Escape');
-  return `${m} ${s} ${esc} p:${hidden} ${cursor} enter:#${selected} folded:${folded}`;
+  // A double click on the upper shelf's top selects the whole shelf.
+  setTool('inspect'); window.debug.snapshot();
+  const px = window.debug.worldToScreen([300, 605, -200]);
+  canvas.dispatchEvent(new PointerEvent('dblclick', { clientX: rect.left + px[0], clientY: rect.top + px[1], bubbles: true, pointerId: 1 }));
+  const dbl = `${window.debug.inspect().selectType} #${window.debug.inspect().selectPiece}`;
+  key('Escape');
+  return `${m} ${s} ${esc} p:${hidden} ${cursor} enter:#${selected} folded:${folded} dblclick:${dbl}`;
 })();
 const c = window.debug.components();
 const cov = window.debug.pieceCoverage();

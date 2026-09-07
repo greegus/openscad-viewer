@@ -481,7 +481,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
       // Once only. The heading carries the piece's name when it has one and its size when it
       // does not, so adding a size row on top of this one printed the same numbers twice.
       return [
-        ['Width × depth × height', sized([sx, sy, sz], pieceAxes(p))],
+        ['Dimensions', sized([sx, sy, sz], pieceAxes(p))],
         ['Volume', `${((sx * sy * sz) / 1e6).toFixed(2)} dm³`],
         ['Corner', at],
       ];
@@ -737,6 +737,20 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
       readout(hint());
     }
     // The parts list follows the scene, so a piece picked here is findable there.
+    onSelect?.(selected?.piece?.id ?? null);
+  });
+
+  // A double click on a face selects the whole piece, as the modifier does — the second click
+  // has already selected the face, and this widens it.
+  canvas.addEventListener('dblclick', (e) => {
+    if (!state.enabled) return;
+    const target = targetAt(cursorPx(e, canvas), true);
+    if (!target) return;
+    selected = target;
+    anchor = show(selected, selectLines, selectFace);
+    label.textContent = shortLabel(selected);
+    label.hidden = false;
+    readout(describe(selected), heading(selected));
     onSelect?.(selected?.piece?.id ?? null);
   });
 
