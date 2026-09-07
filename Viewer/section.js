@@ -201,8 +201,10 @@ export function createSection({ scene, renderer, view, readout }) {
       const b = state.bounds;
       const centre = { x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2, z: (b.min.z + b.max.z) / 2 };
       centre[axis] = p[axis];
-      // A little larger than the model, so the sheet shows past its edges.
-      const size = { [u]: (b.max[u] - b.min[u]) * 1.06, [v]: (b.max[v] - b.min[v]) * 1.06 };
+      // A little larger than the model, so the sheet shows past its edges: the same margin all
+      // round, 5% of the longer side, rather than a percentage of each side separately.
+      const margin = Math.max(b.max[u] - b.min[u], b.max[v] - b.min[v]) * 0.05;
+      const size = { [u]: (b.max[u] - b.min[u]) + 2 * margin, [v]: (b.max[v] - b.min[v]) + 2 * margin };
       // The sheet's own x and y run along the two other model axes, its z along the cut's axis:
       // a basis built from those, placed in the world like everything else.
       const unit = (k) => modelVector([k === 'x' ? 1 : 0, k === 'y' ? 1 : 0, k === 'z' ? 1 : 0]);
