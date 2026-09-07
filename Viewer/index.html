@@ -1664,10 +1664,11 @@ window.debug = {
     }
     return Math.round(area);
   },
-  cutReport: (id, min, max, slack = 0.01) => {
+  cutReport: (id, min, max, slack = 0.01, onlyPart = -1) => {
     const component = components.find((c) => c.id === id);
     const out = [];
     for (const part of parts) {
+      if (onlyPart >= 0 && parts.indexOf(part) !== onlyPart) continue;
       const position = part.source.attributes.position;
       const touching = new Set(trianglesTouchingBox(part.pristine, component));
       const worldToModel = new THREE.Matrix4().copy(MODEL_TO_WORLD).invert();
@@ -1675,8 +1676,8 @@ window.debug = {
       for (let t = 0; t < position.count / 3 && out.length < 12; t++) {
         const v = [0, 1, 2].map((k) => new THREE.Vector3().fromBufferAttribute(position, t * 3 + k));
         const inside = v.every((p) => { const q = p.clone().applyMatrix4(m); return ['x', 'y', 'z'].every((a, i) => q[a] >= min[i] - slack && q[a] <= max[i] + slack); });
-        if (!inside) continue;
-        out.push({ part: parts.indexOf(part), t, touching: touching.has(t), ...pieceSpaceReport(part.pristine, v, component) });
+        if (!inside || !touching.has(t)) continue;
+        out.push({ part: parts.indexOf(part), t, ...pieceSpaceReport(part.pristine, v, component) });
       }
     }
     return out;

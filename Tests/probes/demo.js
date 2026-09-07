@@ -26,8 +26,10 @@ const section = (() => {
   }
   window.debug.snapshot();
   const d = window.debug.section();
-  // The ghost: over the same shelf the cut's sheet sits at its height, the model's size across.
-  canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: rect.left + px[0], clientY: rect.top + px[1], bubbles: true, pointerId: 1 }));
+  // The ghost: over the same shelf (away from the handle, which stands at its centre) the cut's
+  // sheet sits at its height, the model's size across.
+  const gp = window.debug.worldToScreen([150, 300, -100]);
+  canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: rect.left + gp[0], clientY: rect.top + gp[1], bubbles: true, pointerId: 1 }));
   window.debug.snapshot();
   const g = window.debug.section().ghost;
   // The handle: dragging it up on screen slides the plane up the z axis; the flip button swaps
