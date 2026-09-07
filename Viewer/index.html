@@ -167,6 +167,16 @@
   }
   .pill button:hover { background: rgba(255, 255, 255, 0.08); }
   .pill button.is-on { background: #0a84ff; color: white; }
+  /* The section's flip button, floating beside the handle on the cut plane. */
+  .section-flip {
+    position: absolute; width: 28px; height: 28px; padding: 0; transform: translate(0, 0);
+    display: grid; place-items: center; appearance: none; border: 0; border-radius: 8px;
+    color: white; background: rgba(10, 132, 255, 0.9); cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  }
+  .section-flip:hover { background: rgba(50, 160, 255, 0.95); }
+  .section-flip svg { width: 15px; height: 15px; display: block; }
+  .section-flip[hidden] { display: none; }
   /* Home, left of the view cube: back to the framing the file opened with. */
   #home {
     position: absolute; top: 12px; right: 138px;      /* cube is 118 wide at 12 from the edge */
@@ -224,6 +234,13 @@
 </div>
 <div id="parts-tree"></div>
 
+<script>
+  // Uncaught errors, kept where a test harness can read them: a module that throws while
+  // loading leaves the page silently blank otherwise.
+  window.__errors = [];
+  window.addEventListener('error', (e) => window.__errors.push(`${e.message} @${(e.filename || '').split('/').pop()}:${e.lineno}`));
+  window.addEventListener('unhandledrejection', (e) => window.__errors.push(`rejection: ${e.reason}`));
+</script>
 <script type="importmap">
 { "imports": { "three": "./vendor/three.module.min.js" } }
 </script>
@@ -234,7 +251,7 @@ import { STLLoader } from './vendor/STLLoader.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { createMeasure } from './measure.js';
 import { createInspect } from './inspect.js';
-import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, cutBoxFromPolygons, triangulateConvex, sphereSilhouette, pieceSilhouette, clippedArea, clipToBox, contactPatches, makeClickDetector, cursorPx, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
+import { buildPieceModel, pieceFaces, assignTriangles, trianglesInBox, trianglesTouchingBox, cutBoxFromPolygons, pieceSpaceReport, triangulateConvex, sphereSilhouette, pieceSilhouette, clippedArea, clipToBox, contactPatches, makeClickDetector, cursorPx, MODEL_TO_WORLD, orientToWorld, modelVector, worldToModelVector } from './picking.js';
 import { updateStrokeResolution } from './strokes.js';
 import { createGrid } from './grid.js';
 import { createPalette } from './palette.js';
@@ -1152,11 +1169,12 @@ function tick() {
   updateSilhouettes();
   measure?.update();
   inspect?.update();
+  section?.update();
   renderer.render(scene, view.camera);
   viewCube?.render();
   requestAnimationFrame(tick);
 }
-tick();
+// Started at the end of the script, once everything it touches — the section, the cube — exists.
 
 // The API Swift drives (ScadWebView calls these by name).
 window.loadMesh = load;
@@ -1180,20 +1198,21 @@ function paletteActions() {
   const add = (group, title, run, shortcut, keywords) => list.push({ group, title, run, shortcut, keywords });
 
   add('Mode', mode === 'xray' ? 'Solid view' : 'X-ray view',
-      () => setMode(mode === 'xray' ? 'normal' : 'xray'), null, ['xray', 'transparent', 'solid']);
+      () => setMode(mode === 'xray' ? 'normal' : 'xray'), '⇧X', ['xray', 'transparent', 'solid']);
   add('View', 'Perspective projection', () => setProjection('perspective'), null, ['persp']);
   add('View', 'Orthographic projection', () => setProjection('isometric'), null, ['ortho', 'parallel', 'isometric']);
   add('View', 'Home view', homeView, 'H', ['reset', 'fit', 'frame', 'default']);
   for (const name of Object.keys(VIEWS)) {
     if (name === '3d') continue;
-    add('View', name[0].toUpperCase() + name.slice(1) + ' view', () => setView(name));
+    const key = Object.entries(SHIFT_VIEWS).find(([, v]) => v === name)?.[0];
+    add('View', name[0].toUpperCase() + name.slice(1) + ' view', () => setView(name), key ? '⇧' + key.toUpperCase() : null);
   }
   add('View', tree.isOpen ? 'Collapse the parts list' : 'Expand the parts list', () => tree.togglePanel(), 'P');
 
   add('Overlay', edgesOn ? 'Hide edges' : 'Show edges', () => setEdges(!edgesOn));
 
   add('Tool', tool === 'inspect' ? 'Stop inspecting' : 'Inspect',
-      () => setTool(tool === 'inspect' ? 'none' : 'inspect'), 'V');
+      () => setTool(tool === 'inspect' ? 'none' : 'inspect'), 'V · I');
   add('Tool', tool === 'measure' ? 'Stop measuring' : 'Measure',
       () => setTool(tool === 'measure' ? 'none' : 'measure'), 'M');
   add('Tool', tool === 'section' ? 'Stop the cross section' : 'Cross section',
@@ -1203,15 +1222,21 @@ function paletteActions() {
                 run: () => { setTool('section'); section.setAxis(axis.toLowerCase()); },
                 enabled: () => true });
   }
-  list.push({ group: 'Section', title: 'Flip the kept side', run: () => section.flip(),
+  list.push({ group: 'Section', title: 'Flip the kept side', shortcut: '⇥', run: () => section.flip(),
+              enabled: () => section.stage !== 'off' && section.stage !== 'plane' });
+  list.push({ group: 'Section', title: 'Move the plane', shortcut: '↑↓ · ⇧ ×10', run: () => {},
               enabled: () => section.stage !== 'off' && section.stage !== 'plane' });
 
   list.push({ group: 'Selection', title: 'Hide selected piece', shortcut: '⌫',
               run: hideSelection, enabled: () => !!inspect?.selection()?.triangles?.length });
   list.push({ group: 'Selection', title: `Show all hidden (${hiddenIds.size})`,
               run: () => restore(), enabled: () => hiddenIds.size > 0 });
-  list.push({ group: 'Selection', title: 'Clear selection',
+  list.push({ group: 'Selection', title: 'Clear selection', shortcut: '⎋',
               run: () => inspect?.clear(), enabled: () => !!inspect?.selection() });
+  list.push({ group: 'Selection', title: 'Select the whole piece', shortcut: '⌘ click · double click',
+              run: () => {}, enabled: () => tool === 'inspect' });
+  list.push({ group: 'View', title: 'Walk the parts list', shortcut: '↑↓ · ↵ · ←→', run: () => {}, enabled: () => tree.isOpen });
+  list.push({ group: 'Palette', title: 'Command palette', shortcut: '⌘K', run: () => {} });
 
   for (const id of hostActions) {
     const [group, title, shortcut] = HOST_TITLES[id] ?? ['File', id, ''];
@@ -1619,6 +1644,43 @@ window.debug = {
     return n;
   },
   triangles: () => parts.reduce((n, p) => n + p.mesh.geometry.attributes.position.count / 3, 0),
+  // Area (mm², model space) of the triangles lying wholly within the region. Counting
+  // triangles cannot tell a face from the same face with a hole cut in it; area can.
+  areaWithin: (min, max, slack = 0.01) => {
+    let area = 0;
+    const v = [0, 1, 2].map(() => new THREE.Vector3());
+    const worldToModel = new THREE.Matrix4().copy(MODEL_TO_WORLD).invert();
+    for (const part of parts) {
+      const position = part.mesh.geometry.attributes.position;
+      const m = new THREE.Matrix4().multiplyMatrices(worldToModel, part.mesh.matrixWorld);
+      for (let t = 0; t < position.count / 3; t++) {
+        let inside = true;
+        for (let k = 0; k < 3 && inside; k++) {
+          v[k].fromBufferAttribute(position, t * 3 + k).applyMatrix4(m);
+          inside = ['x', 'y', 'z'].every((a, i) => v[k][a] >= min[i] - slack && v[k][a] <= max[i] + slack);
+        }
+        if (inside) area += new THREE.Vector3().subVectors(v[1], v[0]).cross(new THREE.Vector3().subVectors(v[2], v[0])).length() / 2;
+      }
+    }
+    return Math.round(area);
+  },
+  cutReport: (id, min, max, slack = 0.01) => {
+    const component = components.find((c) => c.id === id);
+    const out = [];
+    for (const part of parts) {
+      const position = part.source.attributes.position;
+      const touching = new Set(trianglesTouchingBox(part.pristine, component));
+      const worldToModel = new THREE.Matrix4().copy(MODEL_TO_WORLD).invert();
+      const m = new THREE.Matrix4().multiplyMatrices(worldToModel, part.mesh.matrixWorld);
+      for (let t = 0; t < position.count / 3 && out.length < 12; t++) {
+        const v = [0, 1, 2].map((k) => new THREE.Vector3().fromBufferAttribute(position, t * 3 + k));
+        const inside = v.every((p) => { const q = p.clone().applyMatrix4(m); return ['x', 'y', 'z'].every((a, i) => q[a] >= min[i] - slack && q[a] <= max[i] + slack); });
+        if (!inside) continue;
+        out.push({ part: parts.indexOf(part), t, touching: touching.has(t), ...pieceSpaceReport(part.pristine, v, component) });
+      }
+    }
+    return out;
+  },
   hide: () => hideSelection(),
   selection: () => inspect?.selection() ?? null,
   restore: () => restore(),
@@ -1639,4 +1701,6 @@ window.debug = {
 };
 
 load();
+
+tick();
 </script>

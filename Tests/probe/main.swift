@@ -39,8 +39,11 @@ var waited = 0.0
 /// first time (CGAL) and a second from the cache; waiting a fixed time gets one of them wrong.
 func poll() {
     guard let web = findWebView(viewer.view) else { print("no webview"); exit(1) }
+    // PROBE_NOWAIT=1 runs the script after a few seconds regardless — for finding out why a page
+    // never became ready.
+    let noWait = ProcessInfo.processInfo.environment["PROBE_NOWAIT"] == "1" && waited >= 8
     web.evaluateJavaScript("window.debug && window.debug.state().status === '' && window.debug.state().pieces > 0") { v, _ in
-        if (v as? Bool) == true {
+        if (v as? Bool) == true || noWait {
             web.evaluateJavaScript("window.debug.snapshot(); true") { _, _ in
                 web.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { outcome in
                     var result: Any? = nil

@@ -30,8 +30,17 @@ const section = (() => {
   canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: rect.left + px[0], clientY: rect.top + px[1], bubbles: true, pointerId: 1 }));
   window.debug.snapshot();
   const g = window.debug.section().ghost;
+  // The handle: dragging it up on screen slides the plane up the z axis; the flip button swaps
+  // the kept side.
+  const h = window.debug.worldToScreen(window.debug.section().gizmo);
+  for (const [t, dy] of [['pointerdown', 0], ['pointermove', -60], ['pointerup', -60]]) {
+    canvas.dispatchEvent(new PointerEvent(t, { clientX: rect.left + h[0], clientY: rect.top + h[1] + dy, bubbles: true, pointerId: 1 }));
+  }
+  const dragged = Math.round(window.debug.section().offset);
+  document.querySelector('.section-flip').click();
+  const flipped = window.debug.section().flipped;
   setTool('inspect');
-  return `${d.stage} ${d.axis}=${Math.round(d.offset)} keeping ${d.flipped ? '-' : '+'} caps=${d.capVisible} ghost=${g ? g.position.join(',') + '/' + g.scale.slice(0, 2).join('x') : 'none'}`;
+  return `${d.stage} ${d.axis}=${Math.round(d.offset)} keeping ${d.flipped ? '-' : '+'} caps=${d.capVisible} ghost=${g ? g.position.join(',') + '/' + g.scale.slice(0, 2).join('x') : 'none'} dragged=${dragged > d.offset} flipped=${flipped}`;
 })();
 // The view cube: a click on its TOP face aims the camera straight down; a drag on it orbits.
 const cube = (() => {

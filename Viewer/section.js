@@ -41,13 +41,113 @@ export function createSection({ scene, renderer, view, readout }) {
   const ghost = new THREE.Group();
   ghost.visible = false;
   const ghostFill = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
-    new THREE.MeshBasicMaterial({ color: 0x0a84ff, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }));
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide }));
   const ghostEdge = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(1, 1)),
-    new THREE.LineBasicMaterial({ color: 0x0a84ff, transparent: true, opacity: 0.8, depthTest: false }));
+    new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75, depthTest: false }));
   ghostFill.renderOrder = 18;
   ghostEdge.renderOrder = 19;
   ghost.add(ghostFill, ghostEdge);
   scene.add(ghost);
+
+  // The handle on a live cut: a two-headed arrow along the plane's normal at the model's centre,
+  // dragged to slide the plane; and beside it, in the page, a button that swaps the kept side.
+  const gizmo = new THREE.Group();
+  gizmo.visible = false;
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 12),
+    new THREE.MeshBasicMaterial({ color: 0x0a84ff, depthTest: false, transparent: true, opacity: 0.95 }));
+  const headA = new THREE.Mesh(new THREE.ConeGeometry(1, 1, 16), shaft.material);
+  const headB = new THREE.Mesh(new THREE.ConeGeometry(1, 1, 16), shaft.material);
+  for (const m of [shaft, headA, headB]) { m.renderOrder = 30; gizmo.add(m); }
+  scene.add(gizmo);
+  const flipButton = document.createElement('button');
+  flipButton.className = 'section-flip';
+  flipButton.title = 'Swap the kept side (Tab)';
+  flipButton.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5.5h8.5M9 3l2.5 2.5L9 8" /><path d="M13 10.5H4.5M7 8l-2.5 2.5L7 13" /></svg>';
+  flipButton.hidden = true;
+  renderer.domElement.parentElement.appendChild(flipButton);
+  flipButton.addEventListener('click', (e) => { e.stopPropagation(); api.flip(); });
+
+  /// The handle's place and size: at the model's centre in the plane, its length a fraction of
+  /// the model's span so it reads the same at any zoom of the model.
+  function updateGizmo() {
+    const live = !!state.axis && state.stage !== 'off' && state.stage !== 'plane' && state.bounds;
+    gizmo.visible = live;
+    flipButton.hidden = !live;
+    if (!live) return;
+    const b = state.bounds;
+    const centre = { x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2, z: (b.min.z + b.max.z) / 2 };
+    centre[state.axis] = state.offset;
+    const at = new THREE.Vector3(centre.x, centre.y, centre.z).applyMatrix4(MODEL_TO_WORLD);
+    const dir = modelVector(AXES[state.axis].dir);
+    const span = b.span ?? 1000;
+    const length = span * 0.12, radius = span * 0.006, head = span * 0.03;
+    gizmo.position.copy(at);
+    gizmo.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    shaft.scale.set(radius, length, radius);
+    headA.scale.set(head, head * 1.6, head); headA.position.set(0, length / 2 + head * 0.8, 0);
+    headB.scale.set(head, head * 1.6, head); headB.position.set(0, -length / 2 - head * 0.8, 0); headB.rotation.z = Math.PI;
+  }
+
+  /// The flip button follows the handle on screen, every frame.
+  function update() {
+    if (flipButton.hidden) return;
+    const p = gizmo.position.clone().project(view.camera);
+    const canvas = renderer.domElement;
+    const x = (p.x * 0.5 + 0.5) * canvas.clientWidth, y = (-p.y * 0.5 + 0.5) * canvas.clientHeight;
+    flipButton.style.left = `${x + 22}px`;
+    flipButton.style.top = `${y - 14}px`;
+  }
+
+  // Dragging the handle slides the plane: the pointer's ray is matched against the normal line
+  // through the handle, and the plane goes to the closest point on that line.
+  const raycaster = new THREE.Raycaster();
+  let dragging = null;
+  const canvas = renderer.domElement;
+  const ndc = (e) => { const r = canvas.getBoundingClientRect(); return new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); };
+  function alongAxis(e) {
+    raycaster.setFromCamera(ndc(e), view.camera);
+    const origin = new THREE.Vector3(0, 0, 0).applyMatrix4(MODEL_TO_WORLD);
+    const dir = modelVector(AXES[state.axis].dir);
+    // Closest point between the ray and the axis line through the world origin.
+    const r0 = raycaster.ray.origin, rd = raycaster.ray.direction;
+    const w = r0.clone().sub(origin);
+    const a = rd.dot(rd), bb = rd.dot(dir), c = dir.dot(dir), d = rd.dot(w), ee = dir.dot(w);
+    const den = a * c - bb * bb;
+    if (Math.abs(den) < 1e-9) return null;
+    const t = (a * ee - bb * d) / den;           // along the axis line
+    return t;                                    // model offset along the axis (line through origin)
+  }
+  canvas.addEventListener('pointerdown', (e) => {
+    if (!gizmo.visible) return;
+    raycaster.setFromCamera(ndc(e), view.camera);
+    if (!raycaster.intersectObjects([shaft, headA, headB], false).length) return;
+    const start = alongAxis(e);
+    if (start === null) return;
+    dragging = { start, offset: state.offset };
+    canvas.setPointerCapture?.(e.pointerId);
+    e.stopImmediatePropagation();
+    e.preventDefault();
+  }, true);
+  canvas.addEventListener('pointermove', (e) => {
+    if (!dragging) {
+      if (gizmo.visible) {
+        raycaster.setFromCamera(ndc(e), view.camera);
+        const over = raycaster.intersectObjects([shaft, headA, headB], false).length > 0;
+        shaft.material.color.set(over ? 0x5ac8fa : 0x0a84ff);
+        if (over) { canvas.style.cursor = 'grab'; e.stopImmediatePropagation(); }
+      }
+      return;
+    }
+    const now = alongAxis(e);
+    if (now !== null) api.moveTo(dragging.offset + (now - dragging.start));
+    e.stopImmediatePropagation();
+  }, true);
+  canvas.addEventListener('pointerup', (e) => {
+    if (!dragging) return;
+    dragging = null;
+    canvas.releasePointerCapture?.(e.pointerId);
+    e.stopImmediatePropagation();
+  }, true);
 
   /// Stencil pair per material: back faces add, front faces subtract. What remains set is
   /// solid where the plane cuts, and the cap quad is painted through that mask.
@@ -132,6 +232,7 @@ export function createSection({ scene, renderer, view, readout }) {
       overlay.material.needsUpdate = true;
     }
     capGroup.visible = active;
+    updateGizmo();
     report();
   }
 
@@ -144,7 +245,7 @@ export function createSection({ scene, renderer, view, readout }) {
           + ' · ↑↓ to move (⇧ ×10), ⇥ to flip, click a face to cut there');
   }
 
-  return {
+  const api = {
     /// The pieces to cut, and the extent to slide within.
     setTargets(parts, bounds) {
       targets = parts.map((p) => ({
@@ -175,6 +276,18 @@ export function createSection({ scene, renderer, view, readout }) {
     flip() {
       state.flipped = !state.flipped;
       if (state.stage === 'side') state.stage = 'ready';
+      updatePlane();
+    },
+
+    /// Puts the plane at an offset along its axis, within the model.
+    moveTo(offset) {
+      if (!state.axis) return;
+      state.offset = offset;
+      if (state.bounds) {
+        state.offset = Math.max(state.bounds.min[state.axis],
+                                Math.min(state.bounds.max[state.axis], state.offset));
+      }
+      state.stage = 'ready';
       updatePlane();
     },
 
@@ -248,10 +361,13 @@ export function createSection({ scene, renderer, view, readout }) {
       updatePlane();
     },
 
+    update,
     get stage() { return state.stage; },
     get debug() {
       return { ...state, capChildren: capGroup.children.length, capVisible: capGroup.visible,
+               gizmo: gizmo.visible ? gizmo.position.toArray().map(Math.round) : null, flipButton: !flipButton.hidden,
                ghost: ghost.visible ? { position: new THREE.Vector3().setFromMatrixPosition(ghost.matrix).toArray().map(Math.round), scale: ghostFill.scale.toArray().map(Math.round) } : null };
     },
   };
+  return api;
 }

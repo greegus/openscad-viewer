@@ -52,24 +52,27 @@ expect "pieces in several meshes" "$(echo "$out" | field "['inSeveralMeshes']")"
 
 echo "Tests/hide.scad"
 out=$(Tests/probe.sh Tests/hide.scad Tests/probes/hide.js) || { echo "  probe failed: $out"; exit 1; }
-expect "one-line @group/@name form: names"  "$(echo "$out" | field "['names']")"  '["Bottom", "Back", "Top", "Side board"]'
-expect "one-line @group/@name form: groups" "$(echo "$out" | field "['groups']")" '["Unit", "Unit", "Unit", "Neighbour"]'
+expect "one-line @group/@name form: names"  "$(echo "$out" | field "['names']")"  '["Bottom", "Back", "Top", "Side board", "Red block"]'
+expect "one-line @group/@name form: groups" "$(echo "$out" | field "['groups']")" '["Unit", "Unit", "Unit", "Neighbour", "Neighbour"]'
 expect "welded rear plane present before hiding" "$(echo "$out" | field "['rearBefore']")" "true"
 expect "unit hidden: nothing left, rear plane gone, neighbour intact" "$(echo "$out" | field "['unitHidden']")" '{"leftInUnit": 0, "rearPlane": 0, "sideIntact": true}'
 expect "back alone hidden: boards keep their strips of the welded face" "$(echo "$out" | field "['backHidden']")" '{"bottomRearStrip": true, "leftInBack": 0, "topRearStrip": true}'
 expect "neighbour hidden: unit's rear untouched" "$(echo "$out" | field "['sideHidden']")" '{"leftOnSideFace": 0, "unitRearIntact": true}'
 expect "restore brings every triangle back" "$(echo "$out" | field "['restored']")" "true"
+expect "plane z=700: top board (400x400) + side board's top (15x400) + block's underside (200x200)" "$(echo "$out" | field "['topPlaneArea']")" "206000"
+expect "block of another colour hidden: the face it stood on stays whole" "$(echo "$out" | field "['blockHidden']")" '{"leftInBlock": 0, "planeArea": 166000}'
+expect "unit hidden: side board's top and the block's underside stay (46000 less the 0.02 mm cut slack)" "$(echo "$out" | field "['unitHiddenUnderBlock']")" '{"planeArea": 45992}'
 
 echo "Tests/demo.scad"
 out=$(Tests/probe.sh Tests/demo.scad Tests/probes/demo.js) || { echo "  probe failed: $out"; exit 1; }
 expect "names in order" "$(echo "$out" | field "['names']")" '["Corpus: Left side", "Corpus: Right side", "Corpus: Bottom", "Corpus: Top", "Corpus: Back panel", "Shelves: Lower shelf", "Shelves: Upper shelf", "Door: Door"]'
 expect "every piece covered by its faces" "$(echo "$out" | field "['covered']")" "true"
 expect "shelf pitch"     "$(echo "$out" | field "['pitch']")" "Parallel faces · distance 305.0 mm"
-expect "section by clicking a face" "$(echo "$out" | field "['section']")" "ready z=300 keeping - caps=true ghost=300,300,-190/704x484"
+expect "section by clicking a face" "$(echo "$out" | field "['section']")" "ready z=300 keeping - caps=true ghost=300,300,-190/704x484 dragged=true flipped=false"
 expect "view cube: click TOP, drag, home" "$(echo "$out" | field "['cube']")" '{"afterClick": "top 0,0,1", "afterDrag": null, "home": "0.54,-0.73,0.41", "topRegion": [0, 0, 1]}'
 expect "pills follow state; home animates to the opening framing" "$(echo "$out" | field "['pills']")" '{"animating": true, "home": "0.54,-0.73,0.41", "start": "normal isometric", "switched": "xray perspective xray perspective"}'
 expect "keys: tools, parts list, list cursor" "$(echo "$out" | field "['keys']")" "measure section inspect h:0.54,-0.73,0.41 p:0 Right side lit #2 enter:#2 folded:5 dblclick:part #7 shift:top,0,0,1 xray"
-expect "palette: xray, parallel, home" "$(echo "$out" | field "['palette']")" "Mode X-ray view / View Orthographic projection / View Home view H"
+expect "palette: xray, parallel, home" "$(echo "$out" | field "['palette']")" "Mode X-ray view ⇧X / View Orthographic projection / View Home view H"
 expect "shelves and bottom resting on the side patch it" "$(echo "$out" | field "['shelfPatches']")" "20160"
 
 if [ $# -ge 1 ]; then

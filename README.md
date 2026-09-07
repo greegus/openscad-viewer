@@ -266,7 +266,9 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
   regions are the six faces, twelve edges and eight corners; clicking one turns the camera to
   look along it (a face a standard view, an edge or corner a three-quarter one) over a quarter of
   a second so the eye can follow, and the region the camera currently looks along is lit, so the
-  cube says which view is on and not only which way is up. It replaced the row of view buttons. A **home** button to its left
+  cube says which view is on and not only which way is up; the lines between a face's centre and
+  its edge and corner handles are drawn faintly, so the handles can be seen before they are
+  hovered, and every region takes the same tints. It replaced the row of view buttons. A **home** button to its left
   reframes the whole model from the front-right-above, as the file opened — the camera only,
   eased over a quarter of a second like a cube click (direction, up, distance, target and the
   orthographic zoom together); Cmd-R is the reload that also restores hidden pieces. Under the
@@ -615,7 +617,9 @@ furniture is axis-aligned — with the half toward you removed, since looking in
 half a millimetre into the material, or the face's own skin and the cap would fight for the
 pixels. Before the click, a **ghost** of that cut follows the pointer: a translucent sheet in the
 plane the click would cut along, the size of the whole model across it, so the cut is not a guess.
-Clicking another face cuts there instead. Arrow keys move the plane 1 mm, Shift 10 mm,
+Once cut, a two-headed arrow stands on the plane at the model's centre: dragging it slides the
+plane along its axis (the pointer's ray is matched against the axis line), and a button beside
+it swaps the kept side. Clicking another face cuts there instead. Arrow keys move the plane 1 mm, Shift 10 mm,
 Tab flips the kept side, Escape stops. `Cut along X/Y/Z` from the palette starts in the middle
 of the model, because a plane at the edge cuts nothing and looks broken. The cut takes the edge
 overlay and the silhouettes with it, so no line hangs in the cut. (The readout had promised
