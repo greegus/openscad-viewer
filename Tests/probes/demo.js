@@ -67,6 +67,20 @@ const pills = (() => {
   document.querySelector('#projection-pill button[data-projection="isometric"]').click();
   return { start, switched, animating, home };
 })();
+// Keys: V/M/S pick a tool, Escape leaves it for Inspect, P hides the parts list; arrows walk
+// the list with the row's pieces lit in the scene, Enter selects, Left folds a group.
+const keys = (() => {
+  const key = (k) => window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+  const tool = () => window.debug.state().tool;
+  key('m'); const m = tool(); key('s'); const s = tool(); key('Escape'); const esc = tool();
+  key('p'); const hidden = document.getElementById('parts-tree').hidden; key('p');
+  key('ArrowDown'); key('ArrowDown'); key('ArrowDown'); window.debug.snapshot();
+  const cursor = `${document.querySelector('.tree-row.is-cursor .tree-name')?.textContent} lit #${window.debug.inspect().hoverPiece}`;
+  key('Enter'); const selected = window.debug.inspect().selectPiece;
+  key('ArrowLeft'); key('ArrowLeft'); const folded = document.querySelectorAll('.tree-row').length;
+  key('ArrowRight'); key('Escape'); key('Escape');
+  return `${m} ${s} ${esc} p:${hidden} ${cursor} enter:#${selected} folded:${folded}`;
+})();
 const c = window.debug.components();
 const cov = window.debug.pieceCoverage();
 return {
@@ -76,6 +90,7 @@ return {
   section,
   cube,
   pills,
+  keys,
   // The left side's inner face is whole although two shelves rest on it: the mesh has holes
   // there, the face has patches: 2 shelves × 18 × 360 and the bottom × 18 × 400.
   shelfPatches: (window.debug.patches(1) || []).filter((p) => p.normal[0] === 1).reduce((n, p) => n + p.area, 0),

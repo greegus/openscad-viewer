@@ -19,6 +19,10 @@ export function createTree({ container, onToggle, isHidden, label, onHover, onSe
   const collapsed = new Set();          // group keys the user folded shut
   let panelOpen = true;
   let selectedId = null;
+  // The keyboard cursor: a row key ('g:<group key>' or 'p:<id>'), and the rows as last drawn,
+  // in order, so the arrows can walk them.
+  let cursorKey = null;
+  let rows = [];
 
   /// Builds the group tree from the pieces' paths.
   function build(components) {
@@ -103,9 +107,49 @@ export function createTree({ container, onToggle, isHidden, label, onHover, onSe
     body.className = 'tree-body';
     container.appendChild(body);
 
+    rows = [];
     let group = 0;
     for (const node of roots) renderGroup(node, body, 0, () => ++group);
     body.scrollTop = scroll;
+    if (cursorKey && !rows.some((r) => r.key === cursorKey)) cursorKey = null;   // folded away
+  }
+
+  /// Puts the cursor on a row: lit in the list, and its pieces lit in the scene as a hover
+  /// would. Null takes the cursor away and hands the highlight back.
+  function setCursor(key) {
+    cursorKey = key;
+    for (const r of rows) r.el.classList.toggle('is-cursor', r.key === key);
+    const row = rows.find((r) => r.key === key);
+    row?.el.scrollIntoView({ block: 'nearest' });
+    onHover?.(row ? row.ids : null, row?.label);
+  }
+
+  /// Arrow keys and Enter, from the page: down/up walk the rows, right/left unfold and fold a
+  /// group (left on a piece goes to its group), Enter selects a piece or folds a group. Returns
+  /// whether the key was taken.
+  function key(event) {
+    if (!panelOpen || !rows.length) return false;
+    const index = rows.findIndex((r) => r.key === cursorKey);
+    const row = rows[index];
+    switch (event.key) {
+      case 'ArrowDown': setCursor(rows[Math.min(rows.length - 1, index + 1)].key); return true;
+      case 'ArrowUp':   setCursor(rows[Math.max(0, index < 0 ? 0 : index - 1)].key); return true;
+      case 'ArrowRight':
+        if (row?.kind === 'group' && collapsed.has(row.node.key)) { collapsed.delete(row.node.key); render(); setCursor(row.key); }
+        return !!row;
+      case 'ArrowLeft':
+        if (row?.kind === 'group' && !collapsed.has(row.node.key)) { collapsed.add(row.node.key); render(); setCursor(row.key); }
+        else if (row?.kind === 'piece') { const parent = rows.slice(0, index).reverse().find((r) => r.kind === 'group'); if (parent) setCursor(parent.key); }
+        return !!row;
+      case 'Enter':
+        if (row?.kind === 'piece') { onSelect?.(row.ids[0]); selectedId = row.ids[0]; render(); setCursor(row.key); }
+        else if (row?.kind === 'group') { if (collapsed.has(row.node.key)) collapsed.delete(row.node.key); else collapsed.add(row.node.key); render(); setCursor(row.key); }
+        return !!row;
+      case 'Escape':
+        if (cursorKey) { setCursor(null); return true; }
+        return false;
+      default: return false;
+    }
   }
 
   function renderGroup(node, into, depth, nextIndex) {
@@ -131,16 +175,16 @@ export function createTree({ container, onToggle, isHidden, label, onHover, onSe
     // Pointing at a group lights up everything under it, which is how you find out what a
     // group actually is — the names are ours, not the design's.
     hoverable(row, own.map((p) => p.id), node.label ?? `Group ${index}`);
-    // The name is on the row, not on the caret, so clicking the name selects rather than folds.
-    row.querySelector('.tree-name').addEventListener('click', () => {
-      onSelect?.(own[0].id);
-      selectedId = own[0].id;
-      render();
-    });
-    row.querySelector('.tree-caret').addEventListener('click', () => {
+    rows.push({ key: `g:${node.key}`, kind: 'group', node, ids: own.map((p) => p.id), label: node.label ?? `Group ${index}`, el: row });
+    row.classList.toggle('is-cursor', cursorKey === `g:${node.key}`);
+    // A group's name selects nothing — a group is not a piece — it folds and unfolds, like the
+    // caret; hovering it is what shows what the group holds.
+    const fold = () => {
       if (isCollapsed) collapsed.delete(node.key); else collapsed.add(node.key);
       render();
-    });
+    };
+    row.querySelector('.tree-name').addEventListener('click', fold);
+    row.querySelector('.tree-caret').addEventListener('click', fold);
 
     const eye = row.querySelector('.tree-eye');
     eye.innerHTML = hiddenCount === own.length ? EYE_OFF : EYE;
@@ -189,12 +233,16 @@ export function createTree({ container, onToggle, isHidden, label, onHover, onSe
       render();
     });
     hoverable(row, [piece.id]);
+    rows.push({ key: `p:${piece.id}`, kind: 'piece', ids: [piece.id], el: row });
+    row.classList.toggle('is-cursor', cursorKey === `p:${piece.id}`);
     into.appendChild(row);
   }
 
   return {
-    setComponents: (components) => { build(components); collapsed.clear(); selectedId = null; render(); },
+    setComponents: (components) => { build(components); collapsed.clear(); selectedId = null; cursorKey = null; render(); },
     select,
     refresh: render,
+    key,
+    get visible() { return !container.hidden; },
   };
 }
