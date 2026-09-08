@@ -38,6 +38,13 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
         didSet { if isViewLoaded { webView.setHostActions(hostActions) } }
     }
 
+    /// How much of the viewer this host wants: `"full"` for the app, `"preview"` for the
+    /// Quick Look panel, which shows the view controls alone — no tools, no parts list, no
+    /// details readout. Both run the same page, so the two never drift apart.
+    public var chrome: String = "full" {
+        didSet { if isViewLoaded { webView.setChrome(chrome) } }
+    }
+
     /// Called when the palette runs one of `hostActions`.
     public var onHostAction: ((String) -> Void)?
 
@@ -111,6 +118,7 @@ open class ViewerViewController: NSViewController, QLPreviewingController {
             }
         }
         webView.setHostActions(hostActions)
+        webView.setChrome(chrome)
 
         // Every control lives in the page now — the tools at the bottom, display, projection and
         // the view cube at the top right — so the web view fills the whole panel.

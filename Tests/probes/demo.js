@@ -146,12 +146,33 @@ const palette = (() => {
   const input = document.querySelector('.palette-input');
   const first = (text) => { input.value = text; input.dispatchEvent(new Event('input', { bubbles: true })); return document.querySelector('.palette-row')?.textContent.replace(/\s+/g, ' ').trim() ?? ''; };
   const r = [first('xray'), first('parallel'), first('home')].join(' / ');
-  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  // On the palette itself: it listens on its own root, and an Escape sent to the window left it
+  // open — which then swallowed every later key, the palette taking them first.
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   return r;
 })();
 const c = window.debug.components();
 const cov = window.debug.pieceCoverage();
+// The Quick Look chrome: the view controls alone, and the shortcuts that would reach a tool
+// or the list do nothing — H and the view keys still work, and the palette lists no tools.
+const preview = (() => {
+  const key = (k, shift) => window.dispatchEvent(new KeyboardEvent('keydown', { key: k, shiftKey: !!shift, bubbles: true }));
+  const shown = (sel) => getComputedStyle(document.querySelector(sel)).display !== 'none';
+  window.setChrome('preview');
+  key('m'); key('s'); key('p');
+  const groups = [...new Set(window.debug.paletteActions().map((a) => a.group))].join(',');
+  const gone = ['#tools', '#parts-tree'].every((sel) => !shown(sel));
+  const cube = window.debug.viewCube() ? 'cube' : 'no cube';
+  const pills = shown('#view-controls') && shown('#home') ? 'pills' : 'no pills';
+  key('l', true);   // a view key still turns the camera
+  window.debug.settleCamera();
+  const aimed = window.debug.cameraDirection().join(',');
+  window.setChrome('full');
+  const back = shown('#tools');
+  return `${window.debug.state().tool} ${gone}/${cube}/${pills} ${groups} ${aimed} back:${back}`;
+})();
 return {
+  preview,
   names: c.map((x) => `${(x.groups || []).join('/')}: ${x.name}`),
   covered: cov.every((r) => r.faces >= r.inside),
   pitch,

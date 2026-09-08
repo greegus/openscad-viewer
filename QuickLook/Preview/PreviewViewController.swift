@@ -10,6 +10,12 @@ final class PreviewViewController: ViewerViewController {
         // An extension may not spawn OpenSCAD, so it renders through the XPC helper.
         geometryProvider = XPCGeometryProvider()
 
+        // A preview is a look, not a workbench: the view cube, the home button and the two view
+        // pills, and nothing else. Inspecting, measuring, cutting and hiding pieces all leave
+        // the model in a state the panel has no room to explain or undo — and a Quick Look
+        // panel is thrown away on the next arrow key.
+        chrome = "preview"
+
         // Quick Look does not size the view it is handed, so we size ourselves to the panel.
         pinsToHostView = true
 

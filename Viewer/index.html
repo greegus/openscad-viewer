@@ -152,6 +152,10 @@
   }
   /* Nothing to say, nothing to draw — otherwise an empty pill floats there. */
   #readout:empty { display: none; }
+  /* The Quick Look panel is a look, not a workbench: no tools, no parts list, no readout —
+     only the view cube, the home button and the two view pills. Everything else in the page is
+     the same viewer, so a preview and the app never drift apart. */
+  .is-preview #tools, .is-preview #parts-tree, .is-preview #readout { display: none !important; }
   /* The axis a number lies along, as its letter in the axis's colour (the grid's): X/Y/Z for
      a coordinate, W/D/H for a size. A letter says which axis without a legend; a coloured dot
      needed one. */
@@ -1114,6 +1118,8 @@ window.addEventListener('keydown', (event) => {
 const SHIFT_VIEWS = { f: 'front', k: 'back', l: 'left', r: 'right', t: 'top', b: 'bottom' };
 window.addEventListener('keydown', (event) => {
   if (palette?.isOpen || event.metaKey || event.ctrlKey || event.altKey) return;
+  // A preview keeps the view keys (Shift+F…, Shift+X, H) and drops the rest: there is nothing
+  // on screen to show a tool or a list cursor.
   const key = event.key.toLowerCase();
   if (event.shiftKey) {
     if (SHIFT_VIEWS[key]) {
@@ -1123,11 +1129,12 @@ window.addEventListener('keydown', (event) => {
     } else if (key === 'x') { setMode(mode === 'xray' ? 'normal' : 'xray'); event.preventDefault(); }
     return;
   }
+  if (key === 'h') { homeView(); event.preventDefault(); return; }
+  if (chrome === 'preview') return;
   if (key === 'v' || key === 'i') { setTool('inspect'); event.preventDefault(); }
   else if (key === 'm') { setTool('measure'); event.preventDefault(); }
   else if (key === 's') { setTool('section'); event.preventDefault(); }
   else if (key === 'p') { tree.togglePanel(); event.preventDefault(); }
-  else if (key === 'h') { homeView(); event.preventDefault(); }
   // The parts list has the arrows and Enter, unless a section is live — there the arrows move
   // the plane. Escape first takes the list's cursor away, then leaves a tool for Inspect.
   else if (['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(event.key)) {
@@ -1237,6 +1244,19 @@ function tick() {
 
 // The API Swift drives (ScadWebView calls these by name).
 window.loadMesh = load;
+/// How much of the viewer the host wants: "full" (the app) or "preview" (Quick Look — the view
+/// controls alone). The tools and the list are not merely hidden: a preview must not end up in
+/// a state its own chrome cannot show or undo, so the shortcuts that would reach them are off
+/// too, and the palette lists only what a preview can do.
+let chrome = 'full';
+function setChrome(kind) {
+  chrome = kind === 'preview' ? 'preview' : 'full';
+  document.body.classList.toggle('is-preview', chrome === 'preview');
+  if (chrome === 'preview') { setTool('none'); inspect?.clear(); }
+  else setTool(tool);
+}
+
+window.setChrome = setChrome;
 window.setMode = setMode;
 window.setEdges = setEdges;
 window.setTool = setTool;
@@ -1266,9 +1286,19 @@ function paletteActions() {
     const key = Object.entries(SHIFT_VIEWS).find(([, v]) => v === name)?.[0];
     add('View', name[0].toUpperCase() + name.slice(1) + ' view', () => setView(name), key ? '⇧' + key.toUpperCase() : null);
   }
-  add('View', tree.isOpen ? 'Collapse the parts list' : 'Expand the parts list', () => tree.togglePanel(), 'P');
+  if (chrome === 'full') {
+    add('View', tree.isOpen ? 'Collapse the parts list' : 'Expand the parts list', () => tree.togglePanel(), 'P');
+  }
 
   add('Overlay', edgesOn ? 'Hide edges' : 'Show edges', () => setEdges(!edgesOn));
+
+  if (chrome === 'preview') {
+    for (const id of hostActions) {
+      const [group, title, shortcut] = HOST_TITLES[id] ?? ['File', id, ''];
+      add(group, title, () => window.webkit?.messageHandlers?.viewer?.postMessage('action: ' + id), shortcut);
+    }
+    return list;
+  }
 
   add('Tool', tool === 'inspect' ? 'Stop inspecting' : 'Inspect',
       () => setTool(tool === 'inspect' ? 'none' : 'inspect'), 'V · I');
@@ -1405,6 +1435,8 @@ window.resetView = () => {
 /// from outside. Kept deliberately: each entry is what re-verifies a behaviour the README
 /// documents, and hardcoded screen coordinates go stale as the model changes.
 window.debug = {
+  /// What the palette would list right now — its groups say what this chrome offers.
+  paletteActions,
   /// Whole viewer state: mode, projection, overlays, active tool, per-material parts.
   state: () => ({
     mode,

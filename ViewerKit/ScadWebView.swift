@@ -21,6 +21,7 @@ final class ScadWebView: NSView, WKScriptMessageHandler, WKNavigationDelegate {
     private var pendingProjection: String?
     private var pendingView: String?
     private var pendingHostActions: [String]?
+    private var pendingChrome: String?
 
     /// Messages the page sends back, so the controls can follow what the viewer is doing.
     var onMessage: ((String) -> Void)?
@@ -128,6 +129,12 @@ final class ScadWebView: NSView, WKScriptMessageHandler, WKNavigationDelegate {
         webView.evaluateJavaScript("setTool('\(tool)')")
     }
 
+    /// How much of the viewer the host shows: "full" or "preview" (the view controls alone).
+    func setChrome(_ kind: String) {
+        guard loaded else { pendingChrome = kind; return }
+        webView.evaluateJavaScript("setChrome('\(kind)')")
+    }
+
     /// "normal" or "xray"; stored before the page loads and applied once it finishes.
     func setMode(_ mode: String) {
         guard loaded else { pendingMode = mode; return }
@@ -144,6 +151,7 @@ final class ScadWebView: NSView, WKScriptMessageHandler, WKNavigationDelegate {
         if let projection = pendingProjection { setProjection(projection); pendingProjection = nil }
         if let name = pendingView { setView(name); pendingView = nil }
         if let ids = pendingHostActions { setHostActions(ids); pendingHostActions = nil }
+        if let kind = pendingChrome { setChrome(kind); pendingChrome = nil }
     }
 
     func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: Error) {

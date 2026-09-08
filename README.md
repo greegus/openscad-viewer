@@ -46,6 +46,15 @@ be sandboxed and so cannot spawn OpenSCAD; it renders through the XPC helper
 (`LocalGeometryProvider`). Both hand the viewer the same bytes, so `ViewerViewController`
 never learns which host it is in — that difference used to live inside it.
 
+How much of the viewer a host shows is the other half of that seam: `chrome`, `"full"` or
+`"preview"`. The **Quick Look panel takes `"preview"`** — the view cube, the home button and the
+two view pills, and nothing else. A preview is a look, not a workbench: inspecting, measuring,
+cutting and hiding pieces all leave the model in a state the panel has no room to explain or
+undo, and the panel itself is thrown away on the next arrow key in Finder. The tools and the
+parts list are not merely hidden — the keys that would reach them do nothing, and the palette
+lists only what a preview can do — so a preview cannot get into a state its own chrome cannot
+show. Everything else is the same page as the app's, so the two never drift apart.
+
 - **The appexes** are sandboxed (the system will not load them otherwise) and hold
   `temporary-exception.mach-lookup.global-name` for our XPC service.
 - **The helper** is a LaunchAgent with `MachServices`, so launchd starts it on demand and
@@ -738,7 +747,8 @@ boxes were merged on geometry alone, which would swallow two genuinely separate 
 happen to line up, and geometry cannot tell those apart.
 
 **Command palette** (Cmd-K) searches every action the viewer has: modes, projection, the six
-standard views, the overlays, both tools, the selection commands, and whatever the host can do.
+standard views, the overlays, both tools, the selection commands, and whatever the host can do
+— in the Quick Look chrome, the view and overlay actions alone, since the rest is not there.
 It lives in the page rather than in AppKit, because nearly every action is the page's own — and
 so it works in the Quick Look panel too, which has no menu bar and no toolbar. Toggles are named
 for what they will do ("Hide edges" while they are on), and host actions appear only where they
