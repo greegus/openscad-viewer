@@ -114,6 +114,16 @@ const keys = (() => {
   key('Enter'); const selected = window.debug.inspect().selectPiece;
   key('ArrowLeft'); key('ArrowLeft'); const folded = document.querySelectorAll('.tree-row').length;
   key('ArrowRight'); key('Escape'); key('Escape');
+  // A group's name is inert: clicking it neither selects nor folds. The caret folds.
+  const groupClick = (() => {
+    const before = document.querySelectorAll('.tree-row').length;
+    document.querySelector('.tree-row.is-group .tree-name').click();
+    const after = document.querySelectorAll('.tree-row').length;
+    document.querySelector('.tree-row.is-group .tree-caret').click();
+    const caret = document.querySelectorAll('.tree-row').length;
+    document.querySelector('.tree-row.is-group .tree-caret').click();
+    return `${after === before}/${caret < before}/${window.debug.inspect().selectPiece}`;
+  })();
   // A double click on the upper shelf's top selects the whole shelf.
   setTool('inspect'); window.debug.snapshot();
   const px = window.debug.worldToScreen([300, 605, -200]);
@@ -128,7 +138,7 @@ const keys = (() => {
   const xray = window.debug.state().mode;
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'X', shiftKey: true, bubbles: true }));
   setView('3d');
-  return `${m} ${s} ${esc} h:${h} p:${hidden} ${cursor} enter:#${selected} folded:${folded} dblclick:${dbl} shift:${shift} ${xray}`;
+  return `${m} ${s} ${esc} h:${h} p:${hidden} ${cursor} enter:#${selected} folded:${folded} group:${groupClick} dblclick:${dbl} shift:${shift} ${xray}`;
 })();
 // The palette finds X-ray by "xray", the orthographic projection by "parallel", and has Home.
 const palette = (() => {

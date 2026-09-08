@@ -182,13 +182,14 @@ export function createTree({ container, onToggle, isHidden, label, onHover, onSe
     hoverable(row, own.map((p) => p.id), node.label ?? `Group ${index}`);
     rows.push({ key: `g:${node.key}`, kind: 'group', node, ids: own.map((p) => p.id), label: node.label ?? `Group ${index}`, el: row });
     row.classList.toggle('is-cursor', cursorKey === `g:${node.key}`);
-    // A group's name selects nothing — a group is not a piece — it folds and unfolds, like the
-    // caret; hovering it is what shows what the group holds.
+    // Folding is the caret's job alone. A group is not a piece, so its name selects nothing —
+    // and it should not fold either: the name is there to be pointed at, which lights up
+    // everything the group holds, and a click that collapsed the row moved the very thing you
+    // were reading. (Enter on the list's cursor still folds.)
     const fold = () => {
       if (isCollapsed) collapsed.delete(node.key); else collapsed.add(node.key);
       render();
     };
-    row.querySelector('.tree-name').addEventListener('click', fold);
     row.querySelector('.tree-caret').addEventListener('click', fold);
 
     const eye = row.querySelector('.tree-eye');

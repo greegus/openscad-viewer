@@ -307,8 +307,10 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
   selection, as before); **P** folds the parts list to its header and opens it again. In the list the **arrows** walk a
   cursor — its row's pieces lit in the scene as a hover would — **Enter** selects a piece or folds
   a group, **Left** folds a group or goes from a piece to its group, **Right** unfolds; while a
-  section is live the up and down arrows still move the plane. A group's name selects nothing —
-  a group is not a piece — it folds, like its caret. Mutually exclusive, and clicking the active one switches it off. The
+  section is live the up and down arrows still move the plane. A group's name is inert: it selects
+  nothing — a group is not a piece — and it does not fold either, since a click that collapsed
+  the row would move the very thing you were reading. Only the **caret** folds it; pointing at
+  the name lights up everything the group holds, which is how you find out what it is. Mutually exclusive, and clicking the active one switches it off. The
   inspection readout sits in the bottom right corner, opposite the parts list.
 - **Test fixture**: `Tests/groove.scad` — a board with a groove milled by `difference()`. It
   pins down three behaviours at once: the subtrahend is not outlined as a piece (1 piece, not

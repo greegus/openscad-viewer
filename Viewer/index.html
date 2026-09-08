@@ -121,6 +121,9 @@
     width: 14px; padding: 0; color: rgba(255, 255, 255, 0.55);
     display: inline-flex; align-items: center; justify-content: center;
   }
+  /* A group's name is not a control: pointing at it lights the group in the scene, but only
+     the caret folds it. */
+  .is-group .tree-name { cursor: default; }
   .tree-caret svg { transition: transform 120ms ease; }
   .tree-caret.is-open svg { transform: rotate(90deg); }
   /* Always present, so a row does not shift when the pointer arrives. */
