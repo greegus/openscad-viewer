@@ -10,4 +10,7 @@ extension has no network access and the viewer's CSP blocks remote scripts, so t
 library has to ship inside the appex bundle. Keeping it here also means the project
 builds with `swiftc` alone — no npm, no bundler, no `node_modules`.
 
-Full licence text: https://github.com/mrdoob/three.js/blob/dev/LICENSE
+Full licence text: `LICENSE-three.js` beside this file — the MIT licence requires it to
+travel with every copy, and `build.sh` copies this directory into both bundles verbatim,
+so it does. (`STLLoader.js`, `OrbitControls.js` and `lines/*` carry no header of their own;
+they are covered by that file.)

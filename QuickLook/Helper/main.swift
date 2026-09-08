@@ -19,7 +19,10 @@ final class RenderService: NSObject, ScadRenderService, NSXPCListenerDelegate {
             // If we cannot see the file (TCC: Desktop/Documents/…), render a copy of the transferred source.
             reply(try ScadRenderer.renderPNG(fromSource: source, originalPath: path, options: options), nil)
         } catch {
-            reply(nil, "\(error)")
+            // localizedDescription, not "\(error)": the string crosses XPC and ends up on
+            // screen in the Quick Look panel, where raw Swift ("failed(status: 1, stderr: …)")
+            // told the reader nothing. RenderError is a LocalizedError for exactly this.
+            reply(nil, error.localizedDescription)
         }
     }
 
@@ -32,7 +35,7 @@ final class RenderService: NSObject, ScadRenderService, NSXPCListenerDelegate {
                 reply(try ScadRenderer.exportMesh(fromSource: source, originalPath: path), nil)
             }
         } catch {
-            reply(nil, "\(error)")
+            reply(nil, error.localizedDescription)
         }
     }
 
@@ -45,7 +48,7 @@ final class RenderService: NSObject, ScadRenderService, NSXPCListenerDelegate {
                 reply(try ScadRenderer.exportMaterials(fromSource: source, originalPath: path), nil)
             }
         } catch {
-            reply(nil, "\(error)")
+            reply(nil, error.localizedDescription)
         }
     }
 

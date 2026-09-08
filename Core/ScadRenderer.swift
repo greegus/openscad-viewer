@@ -14,10 +14,38 @@ enum ScadRenderer {
         var timeout: TimeInterval = 20
     }
 
-    enum RenderError: Error {
+    /// LocalizedError, not a bare Error: this is what the viewer puts on screen, and a plain
+    /// enum reaches `localizedDescription` as "The operation couldn't be completed.
+    /// (…RenderError error 0.)" — which is what the commonest failure of all, OpenSCAD not being
+    /// installed, used to say.
+    enum RenderError: LocalizedError {
         case openscadNotFound
         case timedOut
         case failed(status: Int32, stderr: String)
+
+        var errorDescription: String? {
+            switch self {
+            case .openscadNotFound:
+                return """
+                OpenSCAD was not found.
+
+                The viewer renders through OpenSCAD and cannot do anything without it.
+                Install it from openscad.org, or point the viewer at a copy in Settings.
+                """
+            case .timedOut:
+                return "OpenSCAD took too long and was stopped. A design this heavy has to be "
+                     + "simplified, or rendered in OpenSCAD itself."
+            case .failed(_, let stderr):
+                // OpenSCAD's own words: for a syntax error they name the file and the line,
+                // which is the whole of what the reader needs. Trimmed to the last few lines —
+                // the earlier ones are echoes of the compile that got that far.
+                let lines = stderr.split(separator: "\n", omittingEmptySubsequences: true)
+                                  .map { $0.trimmingCharacters(in: .whitespaces) }
+                                  .filter { !$0.isEmpty }
+                let tail = lines.suffix(6).joined(separator: "\n")
+                return tail.isEmpty ? "OpenSCAD could not render this design." : tail
+            }
+        }
     }
 
     // MARK: - Locating the binary
@@ -344,7 +372,7 @@ extension ScadRenderer {
             header.append(["color": target ?? [0.78, 0.78, 0.78, 1.0], "size": blob.count])
             payload.append(blob)
         }
-        guard !header.isEmpty else { throw RenderError.failed(status: -1, stderr: "no material produced geometry") }
+        guard !header.isEmpty else { throw RenderError.failed(status: -1, stderr: "This design produced no solids — nothing to show.") }
 
         // The piece outlines ride along in the same header — they are derived from the CSG
         // we already have, so they cost nothing extra.

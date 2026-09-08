@@ -779,23 +779,62 @@ time and instant from the cache afterwards.
 It registers as `Viewer` with rank `Alternate` for `org.openscad.scad`, so installing it does
 not take the double-click away from OpenSCAD itself.
 
+## Requirements
+
+- **macOS 13** or newer. Built and used on Apple Silicon; `build.sh` targets whatever machine
+  it runs on, so an Intel build should work but has never been tried.
+- **OpenSCAD 2021.01** or newer, installed separately — [openscad.org](https://openscad.org/downloads.html)
+  or `brew install --cask openscad`. This is not optional: OpenSCAD does the rendering and the
+  viewer only draws the result. It is looked up as `OPENSCAD_PATH` → the app's setting →
+  `/Applications/OpenSCAD*.app` → `~/Applications` → homebrew; `install.sh` says so if it finds
+  none, and `Tools/find-openscad.sh` prints which copy would be used.
+- **Xcode Command Line Tools** (`xcode-select --install`) to build. No Xcode project, no npm, no
+  package manager: `swiftc` and the vendored three.js are the whole toolchain.
+- **python3** only to run `Tests/check.sh`; the app itself does not need it.
+
 ## Install
 
+Distribution is from source: there is no signed download, so clone and build. A locally built
+bundle carries no quarantine flag, which is exactly what a downloaded, ad-hoc-signed app would
+trip over.
+
 ```sh
+git clone git@github.com:greegus/openscad-viewer.git
+cd openscad-viewer
 ./build.sh      # builds build/OpenSCADViewer.app — plain swiftc, no Xcode project
 ./install.sh    # /Applications + LaunchAgent + extension registration
 ./uninstall.sh
 ```
 
+`install.sh` does four things a drag into /Applications cannot: it registers the render helper
+as a per-user LaunchAgent (the sandboxed extensions reach it over XPC and can spawn nothing
+themselves), registers the exported `.scad` type, registers both appexes with `pluginkit`, and
+kills the Quick Look processes that would otherwise keep showing the previous build. It is
+per-user: a second account on the same Mac has to run it too. Before installing it runs
+`Tests/check.sh`, unless a test prerequisite is missing — those are skipped with a word about
+why, since a missing *test* dependency is no reason to refuse an install (`SKIP_CHECKS=1` skips
+them outright).
+
+The version lives in `./VERSION`; `build.sh` stamps it into all three bundles.
+
 `OpenSCADViewer.app` doubles as settings: the OpenSCAD path and clearing the cache.
-OpenSCAD is looked up in this order: `OPENSCAD_PATH` → setting →
-`/Applications/OpenSCAD*.app` → homebrew.
+
+## Releasing
+
+A release is a tag plus notes on GitHub — no binary. Bump `./VERSION`, tag it, and let the
+release notes say what changed and what it needs (see *Requirements*): whoever wants it clones
+and runs `./build.sh && ./install.sh`. That is the honest form for an ad-hoc-signed app with
+Quick Look extensions in it, and it happens to be the form with no Gatekeeper story at all.
 
 ## Known limitations / next steps
 
-- Signing is **ad-hoc** — fine locally. Distribution needs a Developer ID and notarisation.
-  The Mac App Store is out: the `temporary-exception` entitlement is not accepted there
-  (the alternative would be an App Group with a shared cache instead of XPC).
+- Signing is **ad-hoc**, and releases are source-only for that reason: a downloaded bundle is
+  quarantined, Gatekeeper refuses an unnotarised app, and — worse — the Quick Look appexes
+  inside a quarantined bundle fail to load *silently*, so previews would simply do nothing with
+  no way to tell why. A signed download needs a Developer ID and notarisation. The Mac App
+  Store is out either way: the `temporary-exception` entitlement is not accepted there (the
+  alternative would be an App Group with a shared cache instead of XPC).
+- **No app icon** yet, so Finder and the Dock show the generic one.
 - The helper is installed by hand into `~/Library/LaunchAgents`; the "proper" way is
   `SMAppService.agent` registered from the container app.
 - Dependencies are only resolved from relative `include`/`use` next to the file;

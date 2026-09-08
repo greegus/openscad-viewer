@@ -1,5 +1,4 @@
-
 .DS_Store
 # Built by ./build.sh
 build/
-Core/Fingerprint.swiftbuild/
+Core/Fingerprint.swift

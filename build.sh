@@ -55,9 +55,17 @@ swiftc -O -target "$TARGET" -sdk "$SDK" -parse-as-library -module-name ScadPrevi
 mkdir -p "$OUT/Contents/Resources/Web" "$PREVIEW/Contents/Resources/Web"
 cp -R Viewer/ "$OUT/Contents/Resources/Web/"
 cp -R Viewer/ "$PREVIEW/Contents/Resources/Web/"
-cp QuickLook/Preview/Info.plist "$PREVIEW/Contents/Info.plist"
-cp App/Info.plist "$OUT/Contents/Info.plist"
-cp QuickLook/Thumbnail/Info.plist "$APPEX/Contents/Info.plist"
+# One version, in ./VERSION, stamped into all three bundles: it used to be written out by hand
+# in each Info.plist, which is how they came to disagree.
+VERSION=$(tr -d '[:space:]' < VERSION)
+stamp() {   # stamp <source plist> <destination>
+  cp "$1" "$2"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" \
+                          -c "Set :CFBundleVersion $VERSION" "$2" >/dev/null
+}
+stamp QuickLook/Preview/Info.plist "$PREVIEW/Contents/Info.plist"
+stamp App/Info.plist "$OUT/Contents/Info.plist"
+stamp QuickLook/Thumbnail/Info.plist "$APPEX/Contents/Info.plist"
 printf 'APPL????' > "$OUT/Contents/PkgInfo"
 
 echo "→ signing (ad-hoc)"
