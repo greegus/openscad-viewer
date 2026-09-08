@@ -428,6 +428,10 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     if (parts.every((p) => p.axis)) parts.sort((a, b) => 'xyz'.indexOf(a.axis) - 'xyz'.indexOf(b.axis));
     return Object.assign(parts, { unit: 'mm' });
   };
+  /// An axis on its own, as a value: the letter alone, in the axis's colour — what "Facing" and
+  /// "Along" say, and they should say it the same way the numbers do.
+  const axisTag = (name) => [{ text: '', axis: name.toLowerCase(), label: name }];
+
   /// A point, in the model's coordinates: x, y, z each behind its axis letter, no commas.
   const coords = (world) => {
     const m = worldToModelVector(world);
@@ -497,7 +501,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
       const axis = axisName(f.b.clone().sub(f.a).normalize());
       return [
         ['Length', `${mm(f.length)} mm`],
-        ...(axis ? [['Along', axis]] : []),
+        ...(axis ? [['Along', axisTag(axis)]] : []),
         ['Start', coords(f.a)],
         ['End', coords(f.b)],
       ];
@@ -561,7 +565,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     return [
       ['Size', sized([f.width, f.height], [f.u, f.w].map((d) => (d ? axisName(d)?.toLowerCase() ?? null : null)))],
       ['Area', `${(f.area / 100).toFixed(1)} cm²`],
-      ...(axis ? [['Facing', axis]] : []),
+      ...(axis ? [['Facing', axisTag(axis)]] : []),
     ];
   }
 

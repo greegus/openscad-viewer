@@ -324,7 +324,8 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
     red, green and blue): a size reads `W 565 × D 15 × H 1415` — width, depth, height, how
     furniture is quoted, and with the model's z up there is no doubt which number is the upright
     one — so a board the design has turned, or one from a STEP file, no longer leaves you
-    guessing which 15 is the thickness. A coordinate keeps the axes themselves, `X Y Z`. (Both
+    guessing which 15 is the thickness. A coordinate keeps the axes themselves, `X Y Z`, and so do the `Facing` and `Along` rows,
+    whose whole value is an axis. (Both
     were coloured dots first; a dot needs a legend, a letter does not.) Axes
     are the model's throughout: a Z-up design's top faces Z, whatever the scene calls up.
     An edge names its start and end, an arc its centre, a part its corner — as coordinates in the

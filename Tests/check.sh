@@ -36,8 +36,8 @@ expect "measure corner to corner"          "$(echo "$out" | field "['measured'][
 expect "measure rim centre to rim centre"  "$(echo "$out" | field "['measured']['centres']")" "Centre to centre · distance 80.6 mm"
 expect "measure corner to face"            "$(echo "$out" | field "['measured']['vertexFace']")" "Vertex to face · distance 25.0 mm"
 expect "axis letters on the cube's dimensions" "$(echo "$out" | field "['dots']['piece']")" "Dimensions [W]40 × [D]40 × [H]40 mm Volume 0.06 dm³ Corner [X]0 [Y]0 [Z]0 mm"
-expect "the cube's top faces Z, in the model's axes" "$(echo "$out" | field "['dots']['face']")" "Size [W]40 × [D]40 mm Area 16.0 cm² Facing Z"
-expect "an edge names its ends, with axis letters" "$(echo "$out" | field "['dots']['edge']")" "Length 40 mm Along X Start [X]0 [Y]0 [Z]40 mm End [X]40 [Y]0 [Z]40 mm"
+expect "the cube's top faces Z, in the model's axes" "$(echo "$out" | field "['dots']['face']")" "Size [W]40 × [D]40 mm Area 16.0 cm² Facing [Z]"
+expect "an edge names its ends, with axis letters" "$(echo "$out" | field "['dots']['edge']")" "Length 40 mm Along [X] Start [X]0 [Y]0 [Z]40 mm End [X]40 [Y]0 [Z]40 mm"
 expect "the panel is hidden over empty space" "$(echo "$out" | field "['dots']['emptyHidden']")" "true"
 
 echo "Tests/flush.scad"
