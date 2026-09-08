@@ -38,6 +38,7 @@ expect "measure corner to face"            "$(echo "$out" | field "['measured'][
 expect "axis letters on the cube's dimensions" "$(echo "$out" | field "['dots']['piece']")" "Dimensions [W]40 × [D]40 × [H]40 mm Volume 0.06 dm³ Corner [X]0 [Y]0 [Z]0 mm"
 expect "the cube's top faces Z, in the model's axes" "$(echo "$out" | field "['dots']['face']")" "Size [W]40 × [D]40 mm Area 16.0 cm² Facing [Z]"
 expect "an edge names its ends, with axis letters" "$(echo "$out" | field "['dots']['edge']")" "Length 40 mm Along [X] Start [X]0 [Y]0 [Z]40 mm End [X]40 [Y]0 [Z]40 mm"
+expect "a click copies the value without letters or unit" "$(echo "$out" | field "['dots']['copied']")" "40 × 40 × 40 | 40 × 40 × 40 | 0.06 dm³ | 0 0 0"
 expect "the panel is hidden over empty space" "$(echo "$out" | field "['dots']['emptyHidden']")" "true"
 
 echo "Tests/flush.scad"

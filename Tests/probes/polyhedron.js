@@ -39,8 +39,9 @@ const measured = (() => {
   setTool('inspect');
   return { faces, vertices, centres, vertexFace };
 })();
-// The panel's dimensions carry an axis dot per number, in the model's axes; a face says which
-// axis it faces in the same terms (the cube's top faces Z, not the scene's Y).
+// The panel's dimensions carry an axis letter per number, in the model's axes; a face says
+// which axis it faces in the same terms (the cube's top faces Z, not the scene's Y). A click on
+// a value copies it, without the letters and without the unit.
 const dots = (() => {
   setTool('inspect'); setView('3d'); window.debug.snapshot();
   const canvas = document.querySelector('canvas');
@@ -52,13 +53,19 @@ const dots = (() => {
     return [...document.querySelectorAll('.readout-table > span')].map((s) => s.innerHTML.replace(/<span class="axis-tag axis-.">(.)<\/span>/g, '[$1]')).filter(Boolean).join(' ');
   };
   const piece = hover([20, 20, 40], true), face = hover([20, 20, 40], false);
+  const copied = (() => {
+    hover([20, 20, 40], true);
+    const cells = [...document.querySelectorAll('.readout-val')].map((el) => el.dataset.copy);
+    document.querySelectorAll('.readout-val')[0].click();
+    return [window.__copied, ...cells].join(' | ');
+  })();
   // An edge names its ends; over empty space the panel is not shown at all.
   const edge = hover([20, 0, 40], false);
   const px = window.debug.worldToScreen([-60, 60, 60]);
   canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: rect.left + 5, clientY: rect.top + 5, bubbles: true, pointerId: 1 }));
   window.debug.snapshot();
   const emptyHidden = getComputedStyle(document.getElementById('readout')).display === 'none';
-  return { piece, face, edge, emptyHidden };
+  return { piece, face, edge, emptyHidden, copied };
 })();
 return {
   dots,

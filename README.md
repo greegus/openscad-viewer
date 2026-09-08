@@ -329,7 +329,12 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
     were coloured dots first; a dot needs a legend, a letter does not.) Axes
     are the model's throughout: a Z-up design's top faces Z, whatever the scene calls up.
     An edge names its start and end, an arc its centre, a part its corner — as coordinates in the
-    model's axes, each number behind its axis letter, no commas. The panel has a fixed width with
+    model's axes, each number behind its axis letter, no commas. Every value is **clickable and copies itself** — a size or a
+    coordinate without the axis letters and without `mm`, since it is wanted in a design or a
+    cutting list, where both would have to be deleted again; the cell flashes to say it went.
+    (The panel stays transparent to the pointer, so it never gets in the way of orbiting; only
+    the values take it, which also freezes the panel while you reach for one, the canvas having
+    stopped seeing the pointer.) The panel has a fixed width with
     the labels right-aligned, the id first in its heading and a rule between heading and values,
     and it is not shown at all while there is nothing to say.
   - A "face" is not a triangle. The mesh is a triangle soup, so faces are reconstructed once

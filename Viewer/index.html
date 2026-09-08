@@ -109,6 +109,12 @@
     margin-top: 4px; align-items: baseline;
   }
   .readout-key { color: rgba(255, 255, 255, 0.45); text-align: right; white-space: nowrap; }
+  /* A value is clickable, to copy it. The panel itself stays transparent to the pointer so it
+     never gets in the way of orbiting; only the values take the pointer — which also freezes
+     the panel while you reach for one, since the canvas stops seeing the move. */
+  .readout-val { pointer-events: auto; cursor: pointer; border-radius: 3px; }
+  .readout-val:hover { background: rgba(255, 255, 255, 0.1); box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1); }
+  .readout-val.is-copied { background: rgba(10, 132, 255, 0.35); box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.35); }
   .tree-name { flex: 1; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tree-caret {
     appearance: none; border: 0; background: transparent; cursor: pointer;
@@ -306,6 +312,7 @@ function showReadout(text, heading) {
     key.className = 'readout-key';
     key.textContent = label;
     const val = document.createElement('span');
+    val.className = 'readout-val';
     // A value may come in pieces, each with the model axis it lies along — its letter in that
     // axis's colour (the grid's) in front of it, so 600 × 400 × 800 reads as W, D, H at a glance.
     if (Array.isArray(value)) {
@@ -320,12 +327,45 @@ function showReadout(text, heading) {
         val.appendChild(document.createTextNode(part.text));
       });
       if (value.unit) val.appendChild(document.createTextNode(' ' + value.unit));
+      // What a click copies: the numbers as shown, without the axis letters and without the
+      // unit — a coordinate or a size is wanted in a design or a cutting list, where "mm" and
+      // an axis letter would only have to be deleted again. A lone axis copies its letter.
+      val.dataset.copy = value.every((part) => part.text === '')
+        ? value.map((part) => part.label).join('')
+        : value.map((part) => part.text).join(value.sep ?? ' × ');
     } else {
       val.textContent = value;
+      val.dataset.copy = value;
     }
+    val.title = 'Click to copy';
+    val.addEventListener('click', () => copyValue(val));
     table.append(key, val);
   }
   readoutEl.appendChild(table);
+}
+
+/// Copies a value from the details panel, with the cell flashing to say it went.
+async function copyValue(el) {
+  const text = el.dataset.copy ?? el.textContent;
+  // The flash first, and before the await: the panel should answer the click at once, whatever
+  // the clipboard then does.
+  el.classList.add('is-copied');
+  window.__copied = text;   // for the tests
+  setTimeout(() => el.classList.remove('is-copied'), 450);
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // A web view without the clipboard permission still has the old way, and a click is the
+    // user gesture it wants.
+    const box = document.createElement('textarea');
+    box.value = text;
+    box.style.position = 'fixed';
+    box.style.opacity = '0';
+    document.body.appendChild(box);
+    box.select();
+    document.execCommand('copy');
+    box.remove();
+  }
 }
 
 const treeEl = document.getElementById('parts-tree');
