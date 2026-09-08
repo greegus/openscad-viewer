@@ -320,12 +320,15 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
   synthesised secondary click and would collide with the context menu.
   - An edge reports length and the axis it runs along; a face reports its in-plane size, area
     and facing; a part reports its dimensions, volume, model-space corner and an **id**. Every
-    dimension carries a dot in the colour of the model axis it lies along (the grid's red, green
-    and blue), so a board the design has turned — or one from a STEP file — reads as
-    `[y]565 × [z]1415 × [x]15` rather than leaving you to guess which 15 is the thickness. Axes
+    number carries the letter of the model axis it lies along, in that axis's colour (the grid's
+    red, green and blue): a size reads `W 565 × D 15 × H 1415` — width, depth, height, how
+    furniture is quoted, and with the model's z up there is no doubt which number is the upright
+    one — so a board the design has turned, or one from a STEP file, no longer leaves you
+    guessing which 15 is the thickness. A coordinate keeps the axes themselves, `X Y Z`. (Both
+    were coloured dots first; a dot needs a legend, a letter does not.) Axes
     are the model's throughout: a Z-up design's top faces Z, whatever the scene calls up.
     An edge names its start and end, an arc its centre, a part its corner — as coordinates in the
-    model's axes, each number behind its axis dot, no commas. The panel has a fixed width with
+    model's axes, each number behind its axis letter, no commas. The panel has a fixed width with
     the labels right-aligned, the id first in its heading and a rule between heading and values,
     and it is not shown at all while there is nothing to say.
   - A "face" is not a triangle. The mesh is a triangle soup, so faces are reconstructed once

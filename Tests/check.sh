@@ -35,16 +35,16 @@ expect "measure board top to cube top"    "$(echo "$out" | field "['measured']['
 expect "measure corner to corner"          "$(echo "$out" | field "['measured']['vertices']")" "Vertex to vertex · distance 102.0 mm"
 expect "measure rim centre to rim centre"  "$(echo "$out" | field "['measured']['centres']")" "Centre to centre · distance 80.6 mm"
 expect "measure corner to face"            "$(echo "$out" | field "['measured']['vertexFace']")" "Vertex to face · distance 25.0 mm"
-expect "axis dots on the cube's dimensions" "$(echo "$out" | field "['dots']['piece']")" "Dimensions [x]40 × [y]40 × [z]40 mm Volume 0.06 dm³ Corner [x]0 [y]0 [z]0 mm"
-expect "the cube's top faces Z, in the model's axes" "$(echo "$out" | field "['dots']['face']")" "Size [x]40 × [y]40 mm Area 16.0 cm² Facing Z"
-expect "an edge names its ends, with axis dots" "$(echo "$out" | field "['dots']['edge']")" "Length 40 mm Along X Start [x]0 [y]0 [z]40 mm End [x]40 [y]0 [z]40 mm"
+expect "axis letters on the cube's dimensions" "$(echo "$out" | field "['dots']['piece']")" "Dimensions [W]40 × [D]40 × [H]40 mm Volume 0.06 dm³ Corner [X]0 [Y]0 [Z]0 mm"
+expect "the cube's top faces Z, in the model's axes" "$(echo "$out" | field "['dots']['face']")" "Size [W]40 × [D]40 mm Area 16.0 cm² Facing Z"
+expect "an edge names its ends, with axis letters" "$(echo "$out" | field "['dots']['edge']")" "Length 40 mm Along X Start [X]0 [Y]0 [Z]40 mm End [X]40 [Y]0 [Z]40 mm"
 expect "the panel is hidden over empty space" "$(echo "$out" | field "['dots']['emptyHidden']")" "true"
 
 echo "Tests/flush.scad"
 out=$(Tests/probe.sh Tests/flush.scad Tests/probes/flush.js) || { echo "  probe failed: $out"; exit 1; }
 expect "names in order"         "$(echo "$out" | field "['names']")"           '["Lower board", "Upper board", "Wall", "Panel"]'
 expect "welded side claimed by both" "$(echo "$out" | field "['sideClaims']")" '[true, true]'
-expect "upper board front reads its own size" "$(echo "$out" | field "['upperFrontSize']")" "100 × 500 mm"
+expect "upper board front reads its own size" "$(echo "$out" | field "['upperFrontSize']")" "W100 × H500 mm"
 expect "every piece fully covered" "$(echo "$out" | field "['coverage']")"     '["#1 full", "#2 full", "#3 full", "#4 full"]'
 expect "wall ends without the panel" "$(echo "$out" | field "['wallEndTriangles']")" "[6, 6]"
 expect "lower board's covered top is still a face" "$(echo "$out" | field "['lowerTopPatch']")" "2000"

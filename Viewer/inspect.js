@@ -414,19 +414,24 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
              piece: pieceAt(h.point), normal: info.planes[h.faceIndex].normal };
   }
 
-  /// A dimensions value: each number with the model axis it lies along, for the axis dots.
+  /// Which letter a dimension along a model axis wears. Coordinates are the axes themselves,
+  /// so those keep X/Y/Z; a size is read as width, depth and height, which is how furniture is
+  /// quoted and leaves no doubt which number is the upright one (the model's z is up).
+  const SIZE_LETTER = { x: 'W', y: 'D', z: 'H' };
+
+  /// A dimensions value: each number with the model axis it lies along, for the axis tags.
   const sized = (values, axes) => {
-    const parts = values.map((v, i) => ({ text: mm(v), axis: axes[i] ?? null }));
+    const parts = values.map((v, i) => ({ text: mm(v), axis: axes[i] ?? null, label: SIZE_LETTER[axes[i]] ?? null }));
     // In the model's order, x y z, when every dimension has an axis — so dimensions and
     // coordinates read alike, and a turned board's thickness is not first by accident. A
     // board at an odd angle keeps its own order.
     if (parts.every((p) => p.axis)) parts.sort((a, b) => 'xyz'.indexOf(a.axis) - 'xyz'.indexOf(b.axis));
     return Object.assign(parts, { unit: 'mm' });
   };
-  /// A point, in the model's coordinates: x, y, z each behind its axis dot, no commas.
+  /// A point, in the model's coordinates: x, y, z each behind its axis letter, no commas.
   const coords = (world) => {
     const m = worldToModelVector(world);
-    return Object.assign([m.x, m.y, m.z].map((v, i) => ({ text: mm(v), axis: 'xyz'[i] })), { unit: 'mm', sep: ' ' });
+    return Object.assign([m.x, m.y, m.z].map((v, i) => ({ text: mm(v), axis: 'xyz'[i], label: 'XYZ'[i] })), { unit: 'mm', sep: ' ' });
   };
 
   /// Which model axis each of a piece's own axes lies along — its size is in its own axes, and
@@ -500,7 +505,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     if (target.type === 'part') {
       const p = target.piece;
       const [sx, sy, sz] = p.size;
-      const at = Object.assign(p.corner.map((v, i) => ({ text: mm(v), axis: 'xyz'[i] })), { unit: 'mm', sep: ' ' });
+      const at = Object.assign(p.corner.map((v, i) => ({ text: mm(v), axis: 'xyz'[i], label: 'XYZ'[i] })), { unit: 'mm', sep: ' ' });
       // The size is in the heading when the piece is named; otherwise it *is* the heading, so
       // repeating it here would say the same thing twice.
       // Once only. The heading carries the piece's name when it has one and its size when it

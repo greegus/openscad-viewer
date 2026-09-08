@@ -143,10 +143,13 @@
   }
   /* Nothing to say, nothing to draw — otherwise an empty pill floats there. */
   #readout:empty { display: none; }
-  .axis-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin: 0 4px 1px 0; vertical-align: middle; }
-  .axis-x { background: #d9544d; }
-  .axis-y { background: #4c9a52; }
-  .axis-z { background: #4a86c8; }
+  /* The axis a number lies along, as its letter in the axis's colour (the grid's): X/Y/Z for
+     a coordinate, W/D/H for a size. A letter says which axis without a legend; a coloured dot
+     needed one. */
+  .axis-tag { display: inline-block; margin: 0 4px 0 0; font-size: 9.5px; font-weight: 700; letter-spacing: 0.03em; opacity: 0.95; }
+  .axis-x { color: #d9544d; }
+  .axis-y { color: #4c9a52; }
+  .axis-z { color: #4a86c8; }
   /* Under the view cube: display (solid / x-ray) and projection, one glass pill each. */
   #view-controls {
     position: absolute; top: 142px; right: 12px; width: 118px;   /* under the 118 px cube */
@@ -302,12 +305,17 @@ function showReadout(text, heading) {
     key.className = 'readout-key';
     key.textContent = label;
     const val = document.createElement('span');
-    // A value may come in pieces, each with the model axis it lies along — a dot in that axis's
-    // colour (the grid's) in front of it, so 600 × 400 × 800 reads as x, y, z at a glance.
+    // A value may come in pieces, each with the model axis it lies along — its letter in that
+    // axis's colour (the grid's) in front of it, so 600 × 400 × 800 reads as W, D, H at a glance.
     if (Array.isArray(value)) {
       value.forEach((part, i) => {
         if (i) val.appendChild(document.createTextNode(value.sep ?? ' × '));
-        if (part.axis) { const dot = document.createElement('span'); dot.className = `axis-dot axis-${part.axis}`; val.appendChild(dot); }
+        if (part.label) {
+          const tag = document.createElement('span');
+          tag.className = `axis-tag axis-${part.axis}`;
+          tag.textContent = part.label;
+          val.appendChild(tag);
+        }
         val.appendChild(document.createTextNode(part.text));
       });
       if (value.unit) val.appendChild(document.createTextNode(' ' + value.unit));

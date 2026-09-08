@@ -49,7 +49,7 @@ const dots = (() => {
     const px = window.debug.worldToScreen([m[0], m[2], -m[1]]);
     canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: rect.left + px[0], clientY: rect.top + px[1], metaKey: meta, bubbles: true, pointerId: 1 }));
     window.debug.snapshot();
-    return [...document.querySelectorAll('.readout-table span')].map((s) => s.innerHTML.replace(/<span class="axis-dot axis-(.)"><\/span>/g, '[$1]')).filter(Boolean).join(' ');
+    return [...document.querySelectorAll('.readout-table > span')].map((s) => s.innerHTML.replace(/<span class="axis-tag axis-.">(.)<\/span>/g, '[$1]')).filter(Boolean).join(' ');
   };
   const piece = hover([20, 20, 40], true), face = hover([20, 20, 40], false);
   // An edge names its ends; over empty space the panel is not shown at all.
