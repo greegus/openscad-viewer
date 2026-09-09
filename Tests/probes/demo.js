@@ -114,6 +114,14 @@ const keys = (() => {
   key('Enter'); const selected = window.debug.inspect().selectPiece;
   key('ArrowLeft'); key('ArrowLeft'); const folded = document.querySelectorAll('.tree-row').length;
   key('ArrowRight'); key('Escape'); key('Escape');
+  // Cmd-C copies the name of the row the list is on.
+  const copied = (() => {
+    key('ArrowDown'); key('ArrowDown'); key('ArrowDown');
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', metaKey: true, bubbles: true }));
+    const flashed = !!document.querySelector('.tree-row.is-copied');
+    key('Escape');
+    return `${window.__copied}/${flashed}`;
+  })();
   // A group's name is inert: clicking it neither selects nor folds. The caret folds.
   const groupClick = (() => {
     const before = document.querySelectorAll('.tree-row').length;
@@ -138,7 +146,7 @@ const keys = (() => {
   const xray = window.debug.state().mode;
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'X', shiftKey: true, bubbles: true }));
   setView('3d');
-  return `${m} ${s} ${esc} h:${h} p:${hidden} ${cursor} enter:#${selected} folded:${folded} group:${groupClick} dblclick:${dbl} shift:${shift} ${xray}`;
+  return `${m} ${s} ${esc} h:${h} p:${hidden} ${cursor} enter:#${selected} folded:${folded} group:${groupClick} copy:${copied} dblclick:${dbl} shift:${shift} ${xray}`;
 })();
 // The palette finds X-ray by "xray", the orthographic projection by "parallel", and has Home.
 const palette = (() => {

@@ -50,7 +50,7 @@ const dots = (() => {
     const px = window.debug.worldToScreen([m[0], m[2], -m[1]]);
     canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: rect.left + px[0], clientY: rect.top + px[1], metaKey: meta, bubbles: true, pointerId: 1 }));
     window.debug.snapshot();
-    return [...document.querySelectorAll('.readout-table > span')].map((s) => s.innerHTML.replace(/<span class="axis-tag axis-.">(.)<\/span>/g, '[$1]')).filter(Boolean).join(' ');
+    return [...document.querySelectorAll('.readout-table > span')].map((s) => s.innerHTML.replace(/<span class="axis-tag axis-.">(.)<\/span>\u2009/g, '[$1]').replace(/<span class="readout-sep">(.*?)<\/span>/g, '$1')).filter(Boolean).join(' ');
   };
   const piece = hover([20, 20, 40], true), face = hover([20, 20, 40], false);
   const copied = (() => {

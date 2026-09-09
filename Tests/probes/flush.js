@@ -18,7 +18,9 @@ const readout = (() => {
   if (!px) return 'off screen';
   canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: rect.left + px[0], clientY: rect.top + px[1], bubbles: true, pointerId: 1 }));
   window.debug.snapshot();
-  const text = document.getElementById('readout').innerText;
+  // The thin space after an axis letter becomes a plain one here, so the expectation in
+  // check.sh can stay ASCII (bash 3.2 has no $'\u2009').
+  const text = document.getElementById('readout').innerText.replace(/\u2009/g, ' ');
   return (text.match(/Size\s+([^\n]+)/) || [])[1] ?? text;
 })();
 // The lower board's top is entirely under the upper board: the mesh has none of it, the face

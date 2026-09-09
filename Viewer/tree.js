@@ -239,7 +239,7 @@ export function createTree({ container, onToggle, isHidden, label, onHover, onSe
       render();
     });
     hoverable(row, [piece.id]);
-    rows.push({ key: `p:${piece.id}`, kind: 'piece', ids: [piece.id], el: row });
+    rows.push({ key: `p:${piece.id}`, kind: 'piece', ids: [piece.id], label: label(piece), el: row });
     row.classList.toggle('is-cursor', cursorKey === `p:${piece.id}`);
     into.appendChild(row);
   }
@@ -249,6 +249,14 @@ export function createTree({ container, onToggle, isHidden, label, onHover, onSe
     select,
     refresh: render,
     key,
+    /// The row the list is on: the keyboard cursor where there is one, else the selected piece —
+    /// both are "current", and the cursor is the more recent of the two intentions.
+    current() {
+      const row = rows.find((r) => r.key === cursorKey)
+               ?? rows.find((r) => r.kind === 'piece' && r.ids[0] === selectedId);
+      return row ? { label: row.label, kind: row.kind, el: row.el } : null;
+    },
+
     /// Folds the whole list to its header, or opens it again — what the header's caret does.
     togglePanel: () => { panelOpen = !panelOpen; render(); },
     get isOpen() { return panelOpen; },

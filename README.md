@@ -340,9 +340,15 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
     were coloured dots first; a dot needs a legend, a letter does not.) Axes
     are the model's throughout: a Z-up design's top faces Z, whatever the scene calls up.
     An edge names its start and end, an arc its centre, a part its corner — as coordinates in the
-    model's axes, each number behind its axis letter, no commas. Every value is **clickable and copies itself** — a size or a
+    model's axes, each number behind its axis letter, no commas. **⌘C** copies the name of the row the parts list is on — the keyboard cursor's, or the
+    selected piece's — and flashes that row; it is in the palette too, since a modifier
+    shortcut is otherwise unguessable. Every value in the panel is **clickable and copies itself** — a size or a
     coordinate without the axis letters and without `mm`, since it is wanted in a design or a
     cutting list, where both would have to be deleted again; the cell flashes to say it went.
+    The letter is followed by a thin space in the text rather than a CSS margin — a margin sat
+    outside the run and read as uneven from letter to letter, with H and Z looking glued to
+    their number — and the `×` between numbers wears the labels' colour, so the values stay the
+    only bright thing in the row.
     (The panel stays transparent to the pointer, so it never gets in the way of orbiting; only
     the values take it, which also freezes the panel while you reach for one, the canvas having
     stopped seeing the pointer.) The panel has a fixed width with

@@ -115,6 +115,8 @@
   .readout-val { pointer-events: auto; cursor: pointer; border-radius: 3px; }
   .readout-val:hover { background: rgba(255, 255, 255, 0.1); box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1); }
   .readout-val.is-copied { background: rgba(10, 132, 255, 0.35); box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.35); }
+  /* Cmd-C on the list flashes the row it copied, the same blue as a copied value. */
+  .tree-row.is-copied { background: rgba(10, 132, 255, 0.35); }
   .tree-name { flex: 1; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tree-caret {
     appearance: none; border: 0; background: transparent; cursor: pointer;
@@ -159,8 +161,10 @@
   /* The axis a number lies along, as its letter in the axis's colour (the grid's): X/Y/Z for
      a coordinate, W/D/H for a size. A letter says which axis without a legend; a coloured dot
      needed one. */
-  .axis-tag { display: inline-block; margin: 0 4px 0 0; font-weight: 600; }
-  .axis-tag:last-child { margin-right: 0; }
+  .axis-tag { font-weight: 600; }
+  /* The gap after the letter is a thin space in the text, not a margin: a margin sat outside
+     the run and read as uneven from letter to letter (H and Z looked glued to their number). */
+  .readout-sep { color: rgba(255, 255, 255, 0.45); }
   .axis-x { color: #d9544d; }
   .axis-y { color: #4c9a52; }
   .axis-z { color: #4a86c8; }
@@ -324,12 +328,20 @@ function showReadout(text, heading) {
     // axis's colour (the grid's) in front of it, so 600 × 400 × 800 reads as W, D, H at a glance.
     if (Array.isArray(value)) {
       value.forEach((part, i) => {
-        if (i) val.appendChild(document.createTextNode(value.sep ?? ' × '));
+        if (i) {
+          // The × belongs to the label side of the panel, not to the numbers, so it wears the
+          // labels' colour and leaves the values as the only bright thing in the row.
+          const sep = document.createElement('span');
+          sep.className = 'readout-sep';
+          sep.textContent = value.sep ?? ' × ';
+          val.appendChild(sep);
+        }
         if (part.label) {
           const tag = document.createElement('span');
           tag.className = `axis-tag axis-${part.axis}`;
           tag.textContent = part.label;
           val.appendChild(tag);
+          val.appendChild(document.createTextNode('\u2009'));   // thin space
         }
         val.appendChild(document.createTextNode(part.text));
       });
@@ -357,8 +369,13 @@ async function copyValue(el) {
   // The flash first, and before the await: the panel should answer the click at once, whatever
   // the clipboard then does.
   el.classList.add('is-copied');
-  window.__copied = text;   // for the tests
   setTimeout(() => el.classList.remove('is-copied'), 450);
+  await copyText(text);
+}
+
+/// To the clipboard, however this web view will have it.
+async function copyText(text) {
+  window.__copied = text;   // for the tests
   try {
     await navigator.clipboard.writeText(text);
   } catch {
@@ -1117,6 +1134,17 @@ window.addEventListener('keydown', (event) => {
 /// to over a quarter of a second like a cube click, and X to switch between solid and x-ray.
 const SHIFT_VIEWS = { f: 'front', k: 'back', l: 'left', r: 'right', t: 'top', b: 'bottom' };
 window.addEventListener('keydown', (event) => {
+  // Cmd-C copies the name of the row the list is on — the cursor's, or the selected piece's.
+  // Before the modifier guard below, since this is the one shortcut that wants a modifier.
+  if (event.metaKey && event.key.toLowerCase() === 'c' && !event.shiftKey && !event.altKey) {
+    const row = tree.current();
+    if (!row?.label) return;                    // nothing on the list: leave Cmd-C to the page
+    copyText(row.label);
+    row.el.classList.add('is-copied');
+    setTimeout(() => row.el.classList.remove('is-copied'), 450);
+    event.preventDefault();
+    return;
+  }
   if (palette?.isOpen || event.metaKey || event.ctrlKey || event.altKey) return;
   // A preview keeps the view keys (Shift+F…, Shift+X, H) and drops the rest: there is nothing
   // on screen to show a tool or a list cursor.
@@ -1320,6 +1348,9 @@ function paletteActions() {
               run: hideSelection, enabled: () => !!inspect?.selection()?.triangles?.length });
   list.push({ group: 'Selection', title: `Show all hidden (${hiddenIds.size})`,
               run: () => restore(), enabled: () => hiddenIds.size > 0 });
+  list.push({ group: 'Selection', title: 'Copy the name of the selected piece', shortcut: '⌘C',
+              run: () => { const row = tree.current(); if (row?.label) copyText(row.label); },
+              enabled: () => !!tree.current()?.label });
   list.push({ group: 'Selection', title: 'Clear selection', shortcut: '⎋',
               run: () => inspect?.clear(), enabled: () => !!inspect?.selection() });
   list.push({ group: 'Selection', title: 'Select the whole piece', shortcut: '⌘ click · double click',

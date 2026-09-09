@@ -45,7 +45,7 @@ echo "Tests/flush.scad"
 out=$(Tests/probe.sh Tests/flush.scad Tests/probes/flush.js) || { echo "  probe failed: $out"; exit 1; }
 expect "names in order"         "$(echo "$out" | field "['names']")"           '["Lower board", "Upper board", "Wall", "Panel"]'
 expect "welded side claimed by both" "$(echo "$out" | field "['sideClaims']")" '[true, true]'
-expect "upper board front reads its own size" "$(echo "$out" | field "['upperFrontSize']")" "W100 × H500 mm"
+expect "upper board front reads its own size" "$(echo "$out" | field "['upperFrontSize']")" "W 100 × H 500 mm"
 expect "every piece fully covered" "$(echo "$out" | field "['coverage']")"     '["#1 full", "#2 full", "#3 full", "#4 full"]'
 expect "wall ends without the panel" "$(echo "$out" | field "['wallEndTriangles']")" "[6, 6]"
 expect "lower board's covered top is still a face" "$(echo "$out" | field "['lowerTopPatch']")" "2000"
@@ -72,7 +72,7 @@ expect "shelf pitch"     "$(echo "$out" | field "['pitch']")" "Parallel faces ·
 expect "section by clicking a face" "$(echo "$out" | field "['section']")" "ready z=300 keeping - caps=true ghost=300,400,18/720x881 dragged=true flipped=false ghostHalf=true/true inspect:ready/null esc:section/plane/inspect"
 expect "view cube: click TOP, drag, home" "$(echo "$out" | field "['cube']")" '{"afterClick": "top 0,0,1", "afterDrag": null, "home": "0.54,-0.73,0.41", "topRegion": [0, 0, 1]}'
 expect "pills follow state; home animates to the opening framing" "$(echo "$out" | field "['pills']")" '{"animating": true, "home": "0.54,-0.73,0.41", "start": "normal isometric", "switched": "xray perspective xray perspective"}'
-expect "keys: tools, parts list, list cursor" "$(echo "$out" | field "['keys']")" "measure section inspect h:0.54,-0.73,0.41 p:0 Right side lit #2 enter:#2 folded:5 group:true/true/null dblclick:part #7 shift:top,0,0,1 xray"
+expect "keys: tools, parts list, list cursor" "$(echo "$out" | field "['keys']")" "measure section inspect h:0.54,-0.73,0.41 p:0 Right side lit #2 enter:#2 folded:5 group:true/true/null copy:Right side/true dblclick:part #7 shift:top,0,0,1 xray"
 expect "preview chrome: view controls alone" "$(echo "$out" | field "['preview']")" "none true/cube/pills Mode,View,Overlay -1,0,0 back:true"
 expect "palette: xray, parallel, home" "$(echo "$out" | field "['palette']")" "Mode X-ray view ⇧X / View Orthographic projection / View Home view H"
 expect "shelves and bottom resting on the side patch it" "$(echo "$out" | field "['shelfPatches']")" "20160"
