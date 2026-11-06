@@ -256,6 +256,8 @@ export function createTree({ container, onToggle, isHidden, label, onHover, onSe
                ?? rows.find((r) => r.kind === 'piece' && r.ids[0] === selectedId);
       return row ? { label: row.label, kind: row.kind, el: row.el } : null;
     },
+    /// The pieces under the keyboard cursor — one, or a whole group — or null without a cursor.
+    cursorIds: () => rows.find((r) => r.key === cursorKey)?.ids ?? null,
 
     /// Folds the whole list to its header, or opens it again — what the header's caret does.
     togglePanel: () => { panelOpen = !panelOpen; render(); },

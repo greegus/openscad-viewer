@@ -1105,14 +1105,25 @@ function isolate(ids) {
   applyHidden();
 }
 
-/// Hides whatever is selected. Only a part or a whole body: hiding one face of a solid would
-/// leave a hole rather than remove a piece.
+/// Hides what Delete points at: the parts-list row under the keyboard cursor (a piece or a
+/// whole group) if there is one, else the selection — a part, a body, or the piece a selected
+/// face or edge lies on. Never the face alone: that would leave a hole rather than remove a piece.
 function hideSelection() {
-  const ids = inspect?.selection()?.componentIds ?? [];
+  const ids = hideTargets();
   if (!ids.length) return false;
-  inspect.clear();
+  if (inspect?.selection()?.componentIds?.some((id) => ids.includes(id))
+      || ids.includes(inspect?.selectedPieceId())) inspect.clear();
   setHidden(ids, false);
   return true;
+}
+
+function hideTargets() {
+  const cursor = tree.cursorIds();
+  if (cursor?.length) return cursor;
+  const selected = inspect?.selection()?.componentIds ?? [];
+  if (selected.length) return selected;
+  const piece = inspect?.selectedPieceId();
+  return piece !== null && piece !== undefined ? [piece] : [];
 }
 
 function restore() {
@@ -1345,7 +1356,7 @@ function paletteActions() {
               enabled: () => section.stage !== 'off' && section.stage !== 'plane' });
 
   list.push({ group: 'Selection', title: 'Hide selected piece', shortcut: '⌫',
-              run: hideSelection, enabled: () => !!inspect?.selection()?.triangles?.length });
+              run: hideSelection, enabled: () => hideTargets().length > 0 });
   list.push({ group: 'Selection', title: `Show all hidden (${hiddenIds.size})`,
               run: () => restore(), enabled: () => hiddenIds.size > 0 });
   list.push({ group: 'Selection', title: 'Copy the name of the selected piece', shortcut: '⌘C',
@@ -1751,6 +1762,8 @@ window.debug = {
   // missed on one of them leaves its edges hanging in the cut.
   selectPiece: (id) => { setTool('inspect'); inspect?.selectPiece(id); tree.select(id); },
   hidden: () => [...hiddenIds],
+  /// Delete, as the keyboard sends it.
+  pressDelete: () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace' })),
   /// Triangles of the *current* meshes lying wholly inside a model-space box — what is left on
   /// screen in that region after hiding, as opposed to what the pieces claim.
   trianglesWithin: (min, max, slack = 0.01) => {

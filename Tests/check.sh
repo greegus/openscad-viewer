@@ -60,6 +60,7 @@ expect "unit hidden: nothing left, rear plane gone, neighbour intact" "$(echo "$
 expect "back alone hidden: boards keep their strips of the welded face" "$(echo "$out" | field "['backHidden']")" '{"bottomRearStrip": true, "leftInBack": 0, "topRearStrip": true}'
 expect "neighbour hidden: unit's rear untouched" "$(echo "$out" | field "['sideHidden']")" '{"leftOnSideFace": 0, "unitRearIntact": true}'
 expect "restore brings every triangle back" "$(echo "$out" | field "['restored']")" "true"
+expect "Delete hides the selected piece, or the list cursor's group" "$(echo "$out" | field "['deleteKey']")" '{"cursorGroup": true, "selected": true, "selectionCleared": true}'
 expect "plane z=700: top board (400x400) + side board's top (15x400) + block's underside (200x200)" "$(echo "$out" | field "['topPlaneArea']")" "206000"
 expect "block of another colour hidden: the face it stood on stays whole" "$(echo "$out" | field "['blockHidden']")" '{"leftInBlock": 0, "planeArea": 166000}'
 expect "unit hidden: side board's top and the block's underside stay (46000 less the 0.02 mm cut slack)" "$(echo "$out" | field "['unitHiddenUnderBlock']")" '{"planeArea": 45992}'

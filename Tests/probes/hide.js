@@ -64,7 +64,21 @@ const unitHiddenUnderBlock = {
 };
 window.debug.restore();
 
+// Delete hides what is selected, and, with the list's cursor on a row, that row instead.
+const press = (key) => window.dispatchEvent(new KeyboardEvent('keydown', { key }));
+window.debug.selectPiece(byName('Back').id);
+press('Backspace');
+const deleteKey = { selected: window.debug.hidden().sort(), selectionCleared: window.debug.selection() === null };
+window.debug.restore();
+press('ArrowDown');                    // the cursor onto the first row: the Unit group
+press('Delete');
+deleteKey.cursorGroup = window.debug.hidden().sort();
+press('Escape');
+window.debug.restore();
+
 return {
+  deleteKey: { selected: deleteKey.selected.join() === ids('Back').join(), selectionCleared: deleteKey.selectionCleared,
+               cursorGroup: deleteKey.cursorGroup.join() === ids('Bottom', 'Back', 'Top').sort().join() },
   names: c.map((x) => x.name),
   topPlaneArea, blockHidden, unitHiddenUnderBlock,
   groups: c.map((x) => (x.groups ?? []).join('/')),

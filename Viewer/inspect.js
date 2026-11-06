@@ -871,6 +871,9 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     return null;
   };
 
+  /// The piece the selection lies on, whatever was picked — a face or an edge too.
+  const selectedPieceId = () => selected?.piece?.id ?? null;
+
   /// Every feature the picker can offer, with the extent it covers — for finding the ones that
   /// run across more than one piece.
   const features = () => state.features.map((f) => {
@@ -1000,6 +1003,6 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
   /// The fill of a face target, clipped to its piece and with its contact patches.
   const faceFill = (target) => faceGeometry(target.mesh, target.triangles, target.piece, target.face?.patches ?? []);
 
-  return { setTargets, setEnabled, setOcclusion, arcs, debug, faceAt, faceFill, selection, highlightPiece, highlightPieces, selectPiece, features, longestFeature, pieceCoverage, ellipses, patches,
+  return { setTargets, setEnabled, setOcclusion, arcs, debug, faceAt, faceFill, selection, selectedPieceId, highlightPiece, highlightPieces, selectPiece, features, longestFeature, pieceCoverage, ellipses, patches,
            clear, update, setFills };
 }
