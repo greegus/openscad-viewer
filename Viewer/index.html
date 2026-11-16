@@ -1020,6 +1020,8 @@ function updateSilhouettes() {
 /// Pieces switched off in the parts list. Not a deletion: the mesh is rebuilt from a pristine
 /// copy each time, so bringing one back is exact and the .scad file is never touched.
 const hiddenIds = new Set();
+/// Every piece's model, hidden or not: a hidden piece still has an outline to be marked by.
+let fullModel = [];
 
 /// Each piece as a closed solid of its own, by component id: the triangles, and the material
 /// mesh they are drawn in. Empty unless the render supplied one for every piece.
@@ -1154,15 +1156,32 @@ function isolate(ids) {
   applyHidden();
 }
 
-/// Hides what Delete points at: the parts-list row under the keyboard cursor (a piece or a
-/// whole group) if there is one, else the selection — a part, a body, or the piece a selected
-/// face or edge lies on. Never the face alone: that would leave a hole rather than remove a piece.
-function hideSelection() {
-  const ids = hideTargets();
+/// Delete switches what it points at off, and on again: the parts-list row under the keyboard
+/// cursor (a piece or a whole group) if there is one, else the selection — a part, a body, or
+/// the piece a selected face or edge lies on. Never the face alone: that would leave a hole
+/// rather than remove a piece.
+///
+/// What it switches off stays marked — its outline in the scene, its row in the list — so the
+/// same key brings it back: with every target already hidden, Delete shows them instead.
+///
+/// `withGroup` takes the whole group each of those pieces sits in along with it — the platform
+/// modifier with Delete. A piece in no group goes alone.
+function hideSelection(withGroup = false) {
+  let ids = hideTargets();
+  let piece = inspect?.selectedPieceId() ?? inspect?.selection()?.componentIds?.[0] ?? null;
+  if (!ids.length && inspect?.ghosted()) ({ ids, piece } = inspect.ghosted());
+  if (withGroup) ids = [...new Set(ids.flatMap((id) => tree.groupIds(id) ?? [id]))];
   if (!ids.length) return false;
-  if (inspect?.selection()?.componentIds?.some((id) => ids.includes(id))
-      || ids.includes(inspect?.selectedPieceId())) inspect.clear();
-  setHidden(ids, false);
+
+  const show = ids.every((id) => hiddenIds.has(id));
+  setHidden(ids, show);                      // rebuilds the tools' targets, which clears them
+  if (show) {
+    if (piece !== null && !tree.cursorIds()) { setTool('inspect'); inspect?.selectPiece(piece); tree.select(piece); }
+  } else {
+    const outlines = fullModel.filter((p) => ids.includes(p.id)).map((p) => p.outline ?? []);
+    inspect?.ghost(ids, outlines, piece);
+    if (piece !== null) tree.select(piece);
+  }
   return true;
 }
 
@@ -1184,7 +1203,9 @@ function restore() {
 window.addEventListener('keydown', (event) => {
   if (event.key !== 'Delete' && event.key !== 'Backspace') return;
   if (palette?.isOpen) return;              // there, Backspace edits the query
-  if (hideSelection()) event.preventDefault();
+  // Command on a Mac, Ctrl elsewhere: the piece's whole group goes with it.
+  const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? event.metaKey : event.ctrlKey;
+  if (hideSelection(mod)) event.preventDefault();
 });
 
 /// Single-key shortcuts: V or I Inspect, M Measure, S Section, P the parts list, H home; Escape leaves any
@@ -1273,6 +1294,7 @@ async function load() {
     components = manifest?.components ?? [];
     await loadSolids();
     pieceModel = buildPieceModel(components);
+    fullModel = pieceModel;
     buildEdgeOverlay(pieceModel);
     tree.setComponents(components);
 
@@ -1405,8 +1427,11 @@ function paletteActions() {
   list.push({ group: 'Section', title: 'Move the plane', shortcut: '↑↓ · ⇧ ×10', run: () => {},
               enabled: () => section.stage !== 'off' && section.stage !== 'plane' });
 
-  list.push({ group: 'Selection', title: 'Hide selected piece', shortcut: '⌫',
-              run: hideSelection, enabled: () => hideTargets().length > 0 });
+  list.push({ group: 'Selection', title: 'Hide or show the selected piece', shortcut: '⌫',
+              run: () => hideSelection(), enabled: () => hideTargets().length > 0 || !!inspect?.ghosted() });
+  list.push({ group: 'Selection', title: "Hide or show the selected piece's whole group", shortcut: '⌘⌫',
+              run: () => hideSelection(true),
+              enabled: () => [...hideTargets(), ...(inspect?.ghosted()?.ids ?? [])].some((id) => tree.groupIds(id)) });
   list.push({ group: 'Selection', title: `Show all hidden (${hiddenIds.size})`,
               run: () => restore(), enabled: () => hiddenIds.size > 0 });
   list.push({ group: 'Selection', title: 'Copy the name of the selected piece', shortcut: '⌘C',
@@ -1814,6 +1839,7 @@ window.debug = {
   hidden: () => [...hiddenIds],
   /// How many pieces arrived as solids of their own — all of them, or none.
   solids: () => solids.size,
+  ghosted: () => inspect?.ghosted() ?? null,
   /// Delete, as the keyboard sends it.
   pressDelete: () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace' })),
   /// Triangles of the *current* meshes lying wholly inside a model-space box — what is left on
@@ -1856,7 +1882,7 @@ window.debug = {
     }
     return Math.round(area);
   },
-  hide: () => hideSelection(),
+  hide: (withGroup) => hideSelection(withGroup),
   selection: () => inspect?.selection() ?? null,
   restore: () => restore(),
   setHidden: (ids, visible) => setHidden(ids, visible),

@@ -73,17 +73,31 @@ const press = (key) => window.dispatchEvent(new KeyboardEvent('keydown', { key }
 window.debug.selectPiece(byName('Back').id);
 press('Backspace');
 const deleteKey = { selected: window.debug.hidden().sort(), selectionCleared: window.debug.selection() === null };
+// It stays marked, so the same key brings it back, selected as it was.
+deleteKey.ghost = window.debug.ghosted()?.ids.join() === ids('Back').join();
+press('Delete');
+deleteKey.toggledBack = window.debug.hidden().length === 0 && window.debug.selection()?.componentIds.join() === ids('Back').join();
 window.debug.restore();
 press('ArrowDown');                    // the cursor onto the first row: the Unit group
 press('Delete');
 deleteKey.cursorGroup = window.debug.hidden().sort();
+press('Delete');                       // the cursor is still on the row: the group returns
+deleteKey.cursorBack = window.debug.hidden().length === 0;
 press('Escape');
+window.debug.restore();
+// With the platform modifier the piece's whole group goes: the Back takes the Unit with it.
+window.debug.selectPiece(byName('Back').id);
+window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', metaKey: true, ctrlKey: true }));
+deleteKey.withGroup = window.debug.hidden().sort();
+press('Backspace');                    // and without the modifier the whole group returns
+deleteKey.groupBack = window.debug.hidden().length === 0;
 window.debug.restore();
 
 return {
   solids: window.debug.solids(),
-  deleteKey: { selected: deleteKey.selected.join() === ids('Back').join(), selectionCleared: deleteKey.selectionCleared,
-               cursorGroup: deleteKey.cursorGroup.join() === ids('Bottom', 'Back', 'Top').sort().join() },
+  deleteKey: { cursorBack: deleteKey.cursorBack, ghost: deleteKey.ghost, toggledBack: deleteKey.toggledBack, groupBack: deleteKey.groupBack, selected: deleteKey.selected.join() === ids('Back').join(), selectionCleared: deleteKey.selectionCleared,
+               cursorGroup: deleteKey.cursorGroup.join() === ids('Bottom', 'Back', 'Top').sort().join(),
+               withGroup: deleteKey.withGroup.join() === ids('Bottom', 'Back', 'Top').sort().join() },
   names: c.map((x) => x.name),
   topPlaneArea, blockHidden, unitHiddenUnderBlock,
   groups: c.map((x) => (x.groups ?? []).join('/')),

@@ -324,6 +324,7 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
   const followsCamera = () => true;      // any piece may have a cylindrical face, whose grazing lines move
 
   function show(target, lines, face) {
+    if (lines === selectLines) ghosted = null;       // a real selection replaces the ghost
     lines.visible = false;
     face.visible = false;
     if (!target) return null;
@@ -789,7 +790,22 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
     onSelect?.(selected?.piece?.id ?? null);
   });
 
+  /// Pieces switched off with Delete stay marked: their outlines in the selection's stroke,
+  /// with no faces — there are none to light. `piece` is the one that was selected, to be
+  /// selected again when they come back. Any real selection, or clearing, ends it.
+  let ghosted = null;
+  function ghost(ids, outlines, piece = null) {
+    const points = [];
+    for (const outline of outlines) {
+      for (let i = 0; i < outline.length; i += 3) points.push(new THREE.Vector3(outline[i], outline[i + 1], outline[i + 2]));
+    }
+    selectLines.setPoints(points);
+    selectLines.visible = state.enabled && points.length > 0;
+    ghosted = { ids, piece };
+  }
+
   function clear() {
+    ghosted = null;
     if (selected) onSelect?.(null);
     selected = null;
     hovered = null;
@@ -1003,6 +1019,6 @@ export function createInspect({ scene, view, renderer, readout, onSelect }) {
   /// The fill of a face target, clipped to its piece and with its contact patches.
   const faceFill = (target) => faceGeometry(target.mesh, target.triangles, target.piece, target.face?.patches ?? []);
 
-  return { setTargets, setEnabled, setOcclusion, arcs, debug, faceAt, faceFill, selection, selectedPieceId, highlightPiece, highlightPieces, selectPiece, features, longestFeature, pieceCoverage, ellipses, patches,
+  return { setTargets, setEnabled, setOcclusion, arcs, debug, faceAt, faceFill, selection, selectedPieceId, ghost, ghosted: () => ghosted, highlightPiece, highlightPieces, selectPiece, features, longestFeature, pieceCoverage, ellipses, patches,
            clear, update, setFills };
 }
