@@ -399,7 +399,21 @@ shelf the share of its outline that can be picked went from 23 of 74 segments to
     Rebuilt rather than discarded in a shader, because the edge overlay is its own geometry
     derived from the mesh — a shader would leave a hidden piece's edges hanging in the air.
     Measured on the fixture: 52 triangles -> 0 -> 52.
-    A hidden piece's box is **cut out** of every triangle it reaches into, and the remainder
+    With something hidden the model is drawn from **each visible piece's own solid**, not from
+    the union. The union welds: where two boards touch neither has a face left, a flush face
+    runs across several pieces as one polygon, a tenon lies inside its neighbour's extent — so
+    no rule for taking a piece *out* of it can leave the neighbours whole, and three successive
+    rules (below) each traded one tear for another. Instead every piece is rendered once more
+    alone (`CSGSplitter.emit(_:keeping:)`: its solids with whatever cuts them, nothing else),
+    in parallel beside the per-material passes and cached with them, and rides in the same blob
+    (`mesh` on a component, served as `solid<i>.stl`). A piece alone is closed and owes nothing
+    to the others, so hiding one is not drawing it. With nothing hidden the union is still what
+    is drawn. `Tests/hide.scad` pins it: with the back panel hidden the bottom board's upper
+    face is its whole 400 × 400, where cutting left 400 × 385 and a hole.
+    The cutting below remains as the fallback for a design whose pieces do not add up to it —
+    a solid no piece claims (an `intersection`, an `import`), or pieces under a `hull` or
+    `minkowski` — which `CSGSplitter.covers` decides, all or nothing.
+    There, a hidden piece's box is **cut out** of every triangle it reaches into, and the remainder
     kept (`cutBoxFromPolygons`, the complement of the highlight's `clipToBox`). The two
     simpler rules both fail on the welded mesh. Matching on the centroid handed a triangle
     spanning several panels to whichever box held its middle — hiding one panel tore a wedge

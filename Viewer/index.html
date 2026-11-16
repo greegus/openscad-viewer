@@ -1021,12 +1021,76 @@ function updateSilhouettes() {
 /// copy each time, so bringing one back is exact and the .scad file is never touched.
 const hiddenIds = new Set();
 
-/// Rebuilds every material mesh without the triangles of its hidden pieces.
+/// Each piece as a closed solid of its own, by component id: the triangles, and the material
+/// mesh they are drawn in. Empty unless the render supplied one for every piece.
+let solids = new Map();
+
+async function loadSolids() {
+  solids = new Map();
+  if (!components.length || !components.every((c) => c.mesh)) return;
+  const same = (a, b) => a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 1e-6);
+  const loaded = new Map();
+  try {
+    for (const [i, component] of components.entries()) {
+      const part = parts.find((p) => same(p.rgba, component.color ?? []));
+      if (!part) return;                      // a piece with nowhere to be drawn: all or nothing
+      const buffer = await (await fetch(`solid${i}.stl`)).arrayBuffer();
+      loaded.set(component.id, { part, positions: new STLLoader().parse(buffer).attributes.position.array });
+    }
+  } catch { return; }
+  solids = loaded;
+}
+
+/// Rebuilds every material mesh without its hidden pieces.
+///
+/// With nothing hidden the mesh is the design's union, as rendered. With something hidden it
+/// is put together from the visible pieces' own solids instead. The union cannot simply have a
+/// piece taken out of it: it welds — where two boards touch neither has a face left, a flush
+/// face runs across several pieces as one polygon, a tenon lies inside its neighbour's extent —
+/// so whatever is cut away takes some of the neighbours with it or leaves them open. A piece
+/// rendered alone is closed and owes nothing to the others, so hiding one is not drawing it.
 ///
 /// Rebuilding rather than flagging in a shader, because the edge overlay is its own geometry
 /// derived from the mesh — a shader that discarded triangles would leave the edges of a hidden
 /// piece hanging in the air.
 function applyHidden() {
+  if (solids.size && hiddenIds.size) {
+    for (const part of parts) {
+      const own = components.filter((c) => !hiddenIds.has(c.id) && solids.get(c.id).part === part)
+        .map((c) => solids.get(c.id).positions);
+      const positions = new Float32Array(own.reduce((n, a) => n + a.length, 0));
+      let at = 0;
+      for (const a of own) { positions.set(a, at); at += a.length; }
+      setPartGeometry(part, positions);
+    }
+  } else if (!hiddenIds.size) {
+    for (const part of parts) setPartGeometry(part, part.source.attributes.position.array);
+  } else {
+    carveHidden();
+  }
+
+  // The model, and the overlay built from it, both drop what is hidden.
+  pieceModel = buildPieceModel(components.filter((c) => !hiddenIds.has(c.id)));
+  buildEdgeOverlay(pieceModel);
+  retarget();
+  tree?.refresh();
+}
+
+function setPartGeometry(part, positions) {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.computeVertexNormals();
+
+  part.geometry.dispose();
+  part.geometry = geometry;
+  part.mesh.geometry = geometry;
+  part.xray.geometry = geometry;
+}
+
+/// The fallback for a design whose pieces do not add up to it (see `CSGSplitter.covers`), so
+/// there are no solids to draw from: the hidden pieces' boxes are cut out of the union.
+/// Approximate by nature — a neighbour reaching into a hidden piece's box loses that part.
+function carveHidden() {
   const dropped = components.filter((c) => hiddenIds.has(c.id));
 
   for (const part of parts) {
@@ -1060,23 +1124,8 @@ function applyHidden() {
       triangulateConvex(polygons, kept);
     }
 
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(kept, 3));
-    geometry.computeVertexNormals();
-
-    part.geometry.dispose();
-    part.geometry = geometry;
-    part.mesh.geometry = geometry;
-    part.xray.geometry = geometry;
-
-
+    setPartGeometry(part, kept);
   }
-
-  // The model, and the overlay built from it, both drop what is hidden.
-  pieceModel = buildPieceModel(components.filter((c) => !hiddenIds.has(c.id)));
-  buildEdgeOverlay(pieceModel);
-  retarget();
-  tree?.refresh();
 }
 
 /// Switches pieces off or on. Ids rather than triangles, so the same call serves one piece and
@@ -1222,6 +1271,7 @@ async function load() {
     }
 
     components = manifest?.components ?? [];
+    await loadSolids();
     pieceModel = buildPieceModel(components);
     buildEdgeOverlay(pieceModel);
     tree.setComponents(components);
@@ -1762,6 +1812,8 @@ window.debug = {
   // missed on one of them leaves its edges hanging in the cut.
   selectPiece: (id) => { setTool('inspect'); inspect?.selectPiece(id); tree.select(id); },
   hidden: () => [...hiddenIds],
+  /// How many pieces arrived as solids of their own — all of them, or none.
+  solids: () => solids.size,
   /// Delete, as the keyboard sends it.
   pressDelete: () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace' })),
   /// Triangles of the *current* meshes lying wholly inside a model-space box — what is left on

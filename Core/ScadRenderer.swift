@@ -399,7 +399,7 @@ extension ScadRenderer {
         // expanded every loop, and the comments are the fallback for a design without one.
         let named = manifestNames(for: input).map { CSGSplitter.components(in: tree, names: $0) }
             ?? CSGSplitter.components(in: tree, source: scad, values: values)
-        let pieces = named.enumerated().map { index, component -> [String: Any] in
+        let encoded = named.enumerated().map { index, component -> [String: Any] in
             var entry = encode(component.box)
             entry["id"] = index + 1
             if let profile = component.profile { entry["profile"] = profile }
@@ -409,6 +409,40 @@ extension ScadRenderer {
             if !component.cutters.isEmpty { entry["cutters"] = component.cutters.map(encode) }
             return entry
         }
+        // Each piece once more as a solid of its own, for hiding: see `emit(_:keeping:)`. Only
+        // when the pieces add up to the design, and only all or nothing — a model drawn from
+        // its pieces with one of them missing would be worse than the welded one with a hole.
+        var pieces = encoded
+        var solids = Data()
+        if CSGSplitter.covers(tree, paths: Set(named.flatMap(\.paths))) {
+            var meshes = [Data?](repeating: nil, count: named.count)
+            let cores = DispatchSemaphore(value: max(2, ProcessInfo.processInfo.activeProcessorCount))
+            for (index, component) in named.enumerated() {
+                group.enter()
+                queue.async {
+                    cores.wait()
+                    defer { cores.signal(); group.leave() }
+                    let source = work.appendingPathComponent("piece\(index).csg")
+                    let stl = work.appendingPathComponent("piece\(index).stl")
+                    let body = CSGSplitter.emit(tree, keeping: Set(component.paths))
+                    guard (try? body.write(to: source, atomically: true, encoding: .utf8)) != nil,
+                          (try? run(openscad, ["-o", stl.path, source.path], cwd: work, timeout: meshTimeout)) != nil,
+                          let data = try? Data(contentsOf: stl), data.count > 84 else { return }
+                    lock.lock(); meshes[index] = data; lock.unlock()
+                }
+            }
+            group.wait()
+            if meshes.allSatisfy({ $0 != nil }) {
+                for (index, mesh) in meshes.enumerated() {
+                    pieces[index]["mesh"] = mesh!.count
+                    pieces[index]["color"] = CSGSplitter.colour(at: named[index].path, in: tree)
+                        ?? [0.78, 0.78, 0.78, 1.0]
+                    solids.append(mesh!)
+                }
+            }
+        }
+        payload.append(solids)
+
         let json = try JSONSerialization.data(withJSONObject: ["parts": header, "components": pieces])
         var out = Data()
         var length = UInt32(json.count).littleEndian

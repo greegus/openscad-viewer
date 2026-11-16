@@ -57,13 +57,14 @@ expect "one-line @group/@name form: names"  "$(echo "$out" | field "['names']")"
 expect "one-line @group/@name form: groups" "$(echo "$out" | field "['groups']")" '["Unit", "Unit", "Unit", "Neighbour", "Neighbour"]'
 expect "welded rear plane present before hiding" "$(echo "$out" | field "['rearBefore']")" "true"
 expect "unit hidden: nothing left, rear plane gone, neighbour intact" "$(echo "$out" | field "['unitHidden']")" '{"leftInUnit": 0, "rearPlane": 0, "sideIntact": true}'
-expect "back alone hidden: boards keep their strips of the welded face" "$(echo "$out" | field "['backHidden']")" '{"bottomRearStrip": true, "leftInBack": 0, "topRearStrip": true}'
+expect "back alone hidden: boards keep their strips of the welded face, and the bottom its face under the back" "$(echo "$out" | field "['backHidden']")" '{"bottomRearStrip": true, "bottomTopArea": 160000, "leftInBack": 0, "topRearStrip": true}'
 expect "neighbour hidden: unit's rear untouched" "$(echo "$out" | field "['sideHidden']")" '{"leftOnSideFace": 0, "unitRearIntact": true}'
 expect "restore brings every triangle back" "$(echo "$out" | field "['restored']")" "true"
 expect "Delete hides the selected piece, or the list cursor's group" "$(echo "$out" | field "['deleteKey']")" '{"cursorGroup": true, "selected": true, "selectionCleared": true}'
 expect "plane z=700: top board (400x400) + side board's top (15x400) + block's underside (200x200)" "$(echo "$out" | field "['topPlaneArea']")" "206000"
 expect "block of another colour hidden: the face it stood on stays whole" "$(echo "$out" | field "['blockHidden']")" '{"leftInBlock": 0, "planeArea": 166000}'
-expect "unit hidden: side board's top and the block's underside stay (46000 less the 0.02 mm cut slack)" "$(echo "$out" | field "['unitHiddenUnderBlock']")" '{"planeArea": 45992}'
+expect "unit hidden: side board's top (15x400) and the block's underside (200x200) stay" "$(echo "$out" | field "['unitHiddenUnderBlock']")" '{"planeArea": 46000}'
+expect "every piece arrives as a solid of its own" "$(echo "$out" | field "['solids']")" "5"
 
 echo "Tests/demo.scad"
 out=$(Tests/probe.sh Tests/demo.scad Tests/probes/demo.js) || { echo "  probe failed: $out"; exit 1; }

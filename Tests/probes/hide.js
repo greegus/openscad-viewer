@@ -32,6 +32,10 @@ const backHidden = {
   leftInBack: window.debug.trianglesWithin(back[0], back[1]),
   bottomRearStrip: window.debug.trianglesWithin([-1, 400 - 0.01, -1], [401, 400 + 0.01, HR + 0.01], 0.02) > 0,
   topRearStrip: window.debug.trianglesWithin([-1, 400 - 0.01, 700 - HR - 0.01], [401, 400 + 0.01, 701], 0.02) > 0,
+  // The bottom board's upper face, z = 15, runs on under the back panel that stood on it. In
+  // the union that strip is welded away — neither board has a face where they touch — so the
+  // board must come back closed: its whole 400 x 400, not 400 x 385 and a hole.
+  bottomTopArea: window.debug.areaWithin([-1, -1, HR - 0.01], [401, 401, HR + 0.01], 0.02),
 };
 window.debug.restore();
 
@@ -77,6 +81,7 @@ press('Escape');
 window.debug.restore();
 
 return {
+  solids: window.debug.solids(),
   deleteKey: { selected: deleteKey.selected.join() === ids('Back').join(), selectionCleared: deleteKey.selectionCleared,
                cursorGroup: deleteKey.cursorGroup.join() === ids('Bottom', 'Back', 'Top').sort().join() },
   names: c.map((x) => x.name),

@@ -62,6 +62,15 @@ final class ScadWebView: NSView, WKScriptMessageHandler, WKNavigationDelegate {
             manifest.append(["color": entry["color"] ?? [0.78, 0.78, 0.78, 1.0]])
             offset += size
         }
+        // After the materials, each piece once more as a solid of its own, where the render
+        // made them: `mesh` on a component is the size of its blob, in component order.
+        var solids: [Data] = []
+        for component in components {
+            guard let size = component["mesh"] as? Int, offset + size <= blob.count else { solids = []; break }
+            solids.append(blob.subdata(in: offset..<(offset + size)))
+            offset += size
+        }
+        handler.solids = solids
         handler.parts = blobs
         handler.manifest = (try? JSONSerialization.data(
             withJSONObject: ["parts": manifest, "components": components]))
@@ -73,6 +82,7 @@ final class ScadWebView: NSView, WKScriptMessageHandler, WKNavigationDelegate {
         handler.mesh = mesh
         handler.manifest = nil
         handler.parts = []
+        handler.solids = []
         reloadOrLoad()
     }
 
@@ -175,6 +185,7 @@ private final class ResourceHandler: NSObject, WKURLSchemeHandler {
     var mesh: Data?
     var manifest: Data?
     var parts: [Data] = []
+    var solids: [Data] = []
 
     private static let types = [
         "html": "text/html; charset=utf-8",
@@ -196,6 +207,9 @@ private final class ResourceHandler: NSObject, WKURLSchemeHandler {
         } else if path.hasPrefix("part"), path.hasSuffix(".stl"),
                   let index = Int(path.dropFirst(4).dropLast(4)), parts.indices.contains(index) {
             data = parts[index]
+        } else if path.hasPrefix("solid"), path.hasSuffix(".stl"),
+                  let index = Int(path.dropFirst(5).dropLast(4)), solids.indices.contains(index) {
+            data = solids[index]
         } else {
             // SCAD_WEB_DIR is a test hook: the harness runs outside the appex and has no Resources.
             let base = ProcessInfo.processInfo.environment["SCAD_WEB_DIR"].map(URL.init(fileURLWithPath:))

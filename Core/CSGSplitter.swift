@@ -108,6 +108,81 @@ enum CSGSplitter {
     }
 }
 
+// MARK: - One piece as a solid
+
+extension CSGSplitter {
+
+    /// Emits the program for one piece alone: the solids at `paths`, with everything that cuts
+    /// them, and nothing else.
+    ///
+    /// The union of a design welds its pieces together — where two boards touch, neither has a
+    /// face any more — so a piece cannot be taken *out* of the welded mesh without leaving its
+    /// neighbours open. Rendered on its own, each piece is a closed solid, and hiding one is
+    /// simply not drawing it.
+    ///
+    /// Subtrahends are kept whole, as in `emit(_:target:)`: they are what cuts the groove.
+    static func emit(_ node: Node, keeping paths: Set<[Int]>, path: [Int] = [],
+                     subtrahend: Bool = false, depth: Int = 0) -> String {
+        let pad = String(repeating: "\t", count: depth)
+        if subtrahend || paths.contains(path) { return verbatim(node, depth: depth) }
+        // Nothing kept below here: an intersection included, whose operands are no pieces.
+        guard node.name != "intersection", paths.contains(where: { $0.starts(with: path) }) else {
+            return "\(pad)group();\n"
+        }
+        var body = ""
+        for (index, child) in node.children.enumerated() {
+            body += emit(child, keeping: paths, path: path + [index],
+                         subtrahend: node.name == "difference" && index > 0, depth: depth + 1)
+        }
+        return "\(pad)\(node.name)(\(node.args)) {\n\(body)\(pad)}\n"
+    }
+
+    private static func verbatim(_ node: Node, depth: Int) -> String {
+        let pad = String(repeating: "\t", count: depth)
+        if node.children.isEmpty { return "\(pad)\(node.name)(\(node.args));\n" }
+        let body = node.children.map { verbatim($0, depth: depth + 1) }.joined()
+        return "\(pad)\(node.name)(\(node.args)) {\n\(body)\(pad)}\n"
+    }
+
+    /// The colour a piece is drawn in: the outermost `color()` above it, which is the one
+    /// `emit(_:target:)` sorts it by. Nil for a piece with none.
+    static func colour(at path: [Int], in root: Node) -> [Double]? {
+        var node = root
+        if let c = colour(of: node) { return c }
+        for index in path {
+            guard index < node.children.count else { return nil }
+            node = node.children[index]
+            if let c = colour(of: node) { return c }
+        }
+        return nil
+    }
+
+    /// Whether the pieces at `paths` add up to the whole design. They do not when some solid
+    /// belongs to no piece (an intersection, a primitive the reader has no box for), or when a
+    /// piece sits under an operator that makes something else of its operands together (a hull
+    /// of two cubes is not those two cubes). Then the pieces cannot stand in for the model.
+    static func covers(_ root: Node, paths: Set<[Int]>) -> Bool {
+        let solids: Set<String> = ["cube", "sphere", "cylinder", "polyhedron", "linear_extrude",
+                                   "rotate_extrude", "import", "surface"]
+        let blending: Set<String> = ["hull", "minkowski", "resize", "intersection"]
+        func walk(_ node: Node, _ path: [Int]) -> Bool {
+            if paths.contains(path) { return true }
+            if solids.contains(node.name) { return false }
+            let below = paths.contains(where: { $0.starts(with: path) })
+            if blending.contains(node.name) { return !below && !holdsSolid(node) }
+            for (index, child) in node.children.enumerated() {
+                if node.name == "difference" && index > 0 { break }      // cutters are no pieces
+                if !walk(child, path + [index]) { return false }
+            }
+            return true
+        }
+        func holdsSolid(_ node: Node) -> Bool {
+            solids.contains(node.name) || node.children.contains(where: holdsSolid)
+        }
+        return walk(root, [])
+    }
+}
+
 // MARK: - Individual pieces
 
 extension CSGSplitter {
@@ -177,6 +252,9 @@ extension CSGSplitter {
         /// the tree survives, and that is enough to group pieces into the assemblies they were
         /// written as.
         var path: [Int] = []
+        /// Every tree position this piece is made of: its own, plus those of the siblings
+        /// merging folded into it. What has to be rendered to get the piece as a solid.
+        var paths: [[Int]] = []
 
         /// Name from a `// @name` comment, and the `// @group` names enclosing it.
         var name: String?
@@ -187,6 +265,7 @@ extension CSGSplitter {
             self.cutters = cutters
             self.profile = profile
             self.path = path
+            self.paths = [path]
         }
     }
 
@@ -398,9 +477,11 @@ extension CSGSplitter {
 
                     // Keeps the first piece's identity — path, and any name it was given — so a
                     // third sibling still compares equal and the name is not lost.
+                    var kept = a.source
+                    kept.paths += b.source.paths
                     boxes[i] = (min: (0..<3).map { min(a.min[$0], b.min[$0]) },
                                 max: (0..<3).map { max(a.max[$0], b.max[$0]) },
-                                source: a.source)
+                                source: kept)
                     boxes.remove(at: j)
                     changed = true
                     break outer
@@ -418,6 +499,7 @@ extension CSGSplitter {
                                   path: box.source.path)
             piece.name = box.source.name
             piece.groups = box.source.groups
+            piece.paths = box.source.paths
             return piece
         }
         // In the order the design wrote them, which is the tree's order. Appending the pieces
